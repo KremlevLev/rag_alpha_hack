@@ -9,8 +9,6 @@ import logging
 import sys
 from pathlib import Path
 
-import lightning as L
-
 sys.path.insert(0, str(Path(__file__).parent))
 
 import pandas as pd
@@ -393,4 +391,3 @@ if __name__ == "__main__":
         validate_answers=not args.no_validate,
         min_overlap=args.min_overlap,
     )
-    L.storage.save(str(SUBMISSION_CSV))
