@@ -26,6 +26,7 @@ from config import (
     SUBMISSION_CSV,
     WEBSITES_CSV,
     MAX_RESPONSE_WORDS,
+    MAX_RESPONSE_CHARS,
     TEMPERATURE,
 )
 from chunker import chunk_all_websites
@@ -61,6 +62,41 @@ SYSTEM_PROMPT = """Ты - полезный ассистент. Отвечай м
 Не используй вводные фразы вроде "Вот что я нашел" или "На основе информации".
 Сразу переходи к сути. Если информации недостаточно - скажи "Недостаточно информации".
 """.strip()
+
+
+def truncate_to_chars(text: str, max_chars: int) -> str:
+    """
+    Truncate text to maximum character count.
+    
+    This is the PRIMARY truncation for BERT-Recall-L compliance.
+    Cuts at the last complete sentence boundary before the limit.
+    
+    Args:
+        text: Input text
+        max_chars: Maximum number of characters
+        
+    Returns:
+        Truncated text
+    """
+    if len(text) <= max_chars:
+        return text
+    
+    # Try to find last sentence end before the limit
+    truncated = text[:max_chars]
+    
+    # Find the last sentence-ending punctuation
+    for punct in [".", "!", "?", "»"]:
+        last_punct = truncated.rfind(punct)
+        if last_punct > max_chars * 0.3:  # At least 30% of the limit
+            return truncated[:last_punct + 1]
+    
+    # If no good sentence boundary, find last space
+    last_space = truncated.rfind(" ")
+    if last_space > max_chars * 0.5:  # At least half the limit
+        return truncated[:last_space]
+    
+    # Hard cut as last resort
+    return truncated
 
 
 class KaggleGenerator:
@@ -142,7 +178,7 @@ class KaggleGenerator:
             context: Retrieved context from retriever
 
         Returns:
-            Generated answer (truncated to max words)
+            Generated answer (truncated to max words and chars)
         """
         if not context:
             return "Недостаточно информации"
@@ -199,6 +235,7 @@ class KaggleGenerator:
             # Очищаем и обрезаем
             answer = answer.strip()
             answer = self._truncate_to_words(answer, MAX_RESPONSE_WORDS)
+            answer = truncate_to_chars(answer, MAX_RESPONSE_CHARS)
 
             return answer
 

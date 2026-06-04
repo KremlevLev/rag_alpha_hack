@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from generator import (
     truncate_to_words,
+    truncate_to_chars,
     normalize_text,
     word_matches,
     clean_sentence,
@@ -52,6 +53,42 @@ class TestTruncateToWords:
         text = " ".join(words)
         result = truncate_to_words(text, max_words=30)
         assert result == text
+
+
+class TestTruncateToChars:
+    """Tests for character-based truncation."""
+    
+    def test_short_text_unchanged(self) -> None:
+        """Test short text is not modified."""
+        text = "Короткий ответ"
+        result = truncate_to_chars(text, max_chars=150)
+        assert result == text
+    
+    def test_long_text_truncated(self) -> None:
+        """Test long text is truncated to char limit."""
+        text = "Это очень длинный ответ который должен быть обрезан на определенном количестве символов"
+        result = truncate_to_chars(text, max_chars=50)
+        assert len(result) <= 50
+    
+    def test_truncation_at_sentence_end(self) -> None:
+        """Test truncation tries to end at sentence boundary."""
+        text = "Первое предложение. Второе предложение. Третье предложение. И ещё много текста"
+        result = truncate_to_chars(text, max_chars=30)
+        # Should end at a sentence boundary if possible
+        assert result.endswith(".") or result.endswith("!") or result.endswith("?") or len(result) <= 30
+    
+    def test_empty_text(self) -> None:
+        """Test empty text handling."""
+        result = truncate_to_chars("", max_chars=150)
+        assert result == ""
+    
+    def test_exact_char_count(self) -> None:
+        """Test text with exact char count."""
+        text = "Текст ровно сто символов!!!"
+        # Pad to exactly 150 chars
+        text = "Текст ровно сто символов!!!" + " " * (150 - len("Текст ровно сто символов!!!"))
+        result = truncate_to_chars(text, max_chars=150)
+        assert len(result) <= 150
 
 
 class TestNormalizeText:
@@ -151,6 +188,14 @@ class TestExtractAnswerFromContext:
         config = ExtractorConfig(min_sentence_words=2, max_answer_sentences=2)
         result = extract_answer_from_context("счёта", context, config)
         assert "счёта" in result.lower() or "счет" in result.lower()
+    
+    def test_char_truncation_applied(self) -> None:
+        """Test that character truncation is applied to extracted answer."""
+        # Create a context that would produce a long answer
+        context = " ".join(["Номер счёта в личном кабинете. Зайдите в раздел. "] * 10)
+        result = extract_answer_from_context("счёта", context)
+        # Answer should be truncated to MAX_RESPONSE_CHARS (150)
+        assert len(result) <= 150
 
 
 if __name__ == "__main__":

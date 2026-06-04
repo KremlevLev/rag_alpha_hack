@@ -28,13 +28,14 @@ LLM_BASE_URL: Final[str] = "http://localhost:11434/v1"
 LLM_MODEL: Final[str] = "qwen2.5:7b"  # Default model, can be changed
 
 # Chunking parameters
-CHUNK_SIZE: Final[int] = 400  # Target chunk size in characters
-CHUNK_OVERLAP: Final[int] = 50  # Overlap between chunks in characters
+CHUNK_SIZE: Final[int] = 200  # Target chunk size in characters (reduced for shorter answers)
+CHUNK_OVERLAP: Final[int] = 30  # Overlap between chunks in characters
 
 # Retrieval parameters
 TOP_K_RETRIEVAL: Final[int] = 15  # Number of candidates from FAISS
 TOP_K_RERANK: Final[int] = 3  # Number of final results after reranking
 
-# Generation parameters
-MAX_RESPONSE_WORDS: Final[int] = 30  # Hard limit for response length
+# Generation parameters - CRITICAL FOR BERT-RECALL-L
+MAX_RESPONSE_WORDS: Final[int] = 15  # Hard limit for response length (reduced from 30)
+MAX_RESPONSE_CHARS: Final[int] = 150  # Hard character limit
 TEMPERATURE: Final[float] = 0.1  # Low temperature for deterministic output

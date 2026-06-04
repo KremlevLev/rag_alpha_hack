@@ -15,6 +15,7 @@ from config import (
     LLM_BASE_URL,
     LLM_MODEL,
     MAX_RESPONSE_WORDS,
+    MAX_RESPONSE_CHARS,
     TEMPERATURE,
 )
 
@@ -262,6 +263,41 @@ def truncate_to_words(text: str, max_words: int) -> str:
     return truncated
 
 
+def truncate_to_chars(text: str, max_chars: int) -> str:
+    """
+    Truncate text to maximum character count.
+    
+    This is the PRIMARY truncation for BERT-Recall-L compliance.
+    Cuts at the last complete sentence boundary before the limit.
+    
+    Args:
+        text: Input text
+        max_chars: Maximum number of characters
+        
+    Returns:
+        Truncated text
+    """
+    if len(text) <= max_chars:
+        return text
+    
+    # Try to find last sentence end before the limit
+    truncated = text[:max_chars]
+    
+    # Find the last sentence-ending punctuation
+    for punct in [".", "!", "?", "»"]:
+        last_punct = truncated.rfind(punct)
+        if last_punct > max_chars * 0.3:  # At least 30% of the limit
+            return truncated[:last_punct + 1]
+    
+    # If no good sentence boundary, find last space
+    last_space = truncated.rfind(" ")
+    if last_space > max_chars * 0.5:  # At least half the limit
+        return truncated[:last_space]
+    
+    # Hard cut as last resort
+    return truncated
+
+
 def word_matches(word: str, text: str) -> bool:
     """
     Check if word (or its root) is in text.
@@ -318,6 +354,7 @@ def extract_answer_from_context(
         3. Исключает предложения, дублирующие вопрос.
         4. Ранжирует по TF-IDF + позиция + информативность.
         5. Собирает топ-N предложений в связный ответ.
+        6. ПРИМЕНЯЕТ ОБЯЗАТЕЛЬНУЮ обрезку по символам.
     
     Args:
         query: Вопрос пользователя.
@@ -332,7 +369,7 @@ def extract_answer_from_context(
         ...     "Как узнать номер счёта?",
         ...     "Номер счёта доступен в личном кабинете. Зайдите в раздел 'Счета'.",
         ... )
-        "Номер счёта доступен в личном кабинете. Зайдите в раздел 'Счета'."
+        "Номер счёта доступен в личном кабинете."
     """
     if config is None:
         config = ExtractorConfig()
@@ -442,6 +479,10 @@ def extract_answer_from_context(
     
     answer = " ".join(s.text for s in top_sentences)
     
+    # ── Шаг 8: ОБЯЗАТЕЛЬНАЯ обрезка по символам ─────────────
+    
+    answer = truncate_to_chars(answer, MAX_RESPONSE_CHARS)
+    
     return answer
 
 
@@ -474,7 +515,7 @@ class Generator:
             context: Retrieved context from retriever
             
         Returns:
-            Generated answer (truncated to max words)
+            Generated answer (truncated to max words and chars)
         """
         if not context:
             return "Недостаточно информации"
@@ -501,8 +542,9 @@ class Generator:
             
             answer = response.choices[0].message.content or ""
             
-            # Post-process: truncate to max words
+            # Post-process: truncate to max words first, then chars
             answer = truncate_to_words(answer, MAX_RESPONSE_WORDS)
+            answer = truncate_to_chars(answer, MAX_RESPONSE_CHARS)
             
             return answer.strip()
             

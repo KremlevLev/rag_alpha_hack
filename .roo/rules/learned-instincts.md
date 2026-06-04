@@ -88,7 +88,7 @@ This file acts as a local memory bank for project-specific patterns, conventions
 ### Gotchas
 - HTML entities must be decoded before tag removal (order matters)
 - Non-breaking spaces (\xa0) and zero-width chars (\u200b) need explicit handling
-- Incomplete sentence trimming requires checking for [.!?»")] endings
+- Incomplete sentence trimming requires checking for [.!?»")], endings
 - Minimum length check (20 chars) prevents empty/whitespace-only chunks
 
 ---
@@ -133,6 +133,47 @@ This file acts as a local memory bank for project-specific patterns, conventions
 - FAISS assigns sequential IDs (0, 1, 2...) independent of chunk.chunk_id
 - JSON doesn't support int keys, so convert to str on save and back on load
 - Original text preserved in mapping (with ё), normalized only for embedding
+
+---
+
+## 2026-06-04 - Created Obsidian REST API client module
+
+### Patterns Discovered
+- Context manager pattern for HTTP session lifecycle management
+- Factory function `create_obsidian_client()` for convenient instantiation
+- Dataclass-based configuration with frozen=True for immutability
+
+### Conventions
+- `ObsidianConfig` dataclass for configurable parameters (base_url, timeout, api_key)
+- `ObsidianClient` class with private `_session` attribute
+- All methods use `raise_for_status()` for explicit error handling
+- Type hints on all function signatures
+
+### Gotchas
+- Default port 27777 is standard for Obsidian REST API plugin
+- API key is optional - some configurations don't require authentication
+- `append_to_file` reads existing content first, then updates
+
+---
+
+## 2026-06-04 - Fixed BERT-Recall-L Length Penalty Issue
+
+### Patterns Discovered
+- Character-based truncation (`truncate_to_chars`) is PRIMARY for BERT-Recall-L compliance
+- Word-based truncation (`truncate_to_words`) is SECONDARY, applied before char truncation
+- Dual-limit strategy: MAX_RESPONSE_WORDS=15 + MAX_RESPONSE_CHARS=150 ensures answers stay under 3x reference length
+- Retriever's `clean_chunk_text()` already removes `[chunk_id]` prefixes, so context is clean
+
+### Conventions
+- `truncate_to_chars()` tries to end at sentence boundary (., !, ?, ») before hard cut
+- Both `Generator.generate()` and `extract_answer_from_context()` apply char truncation
+- `MAX_RESPONSE_CHARS` imported in generator.py for direct use
+
+### Gotchas
+- BERT-Recall-L metric: Length Coefficient = 0 if answer >= 3x reference length
+- Need to truncate BEFORE returning answer, not after
+- Character limit (150) is more restrictive than word limit (15 words ≈ 100-120 chars)
+- Test `test_char_truncation_applied` verifies extraction respects char limit
 
 ---
 
