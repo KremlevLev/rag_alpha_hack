@@ -366,10 +366,24 @@ def run_pipeline(
     # ── Цикл генерации ────────────────────────────────────────
     results = []
     stats = {"cached": 0, "generated": 0, "failed": 0, "invalid": 0}
-    CHECKPOINT_INTERVAL = 2000  # Сохранять каждые 2000 ответов
+    CHECKPOINT_INTERVAL = 2000
+
+    # Проверяем последний чекпоинт
+    start_idx = 0
+    for cp_num in [6000, 4000, 2000]:
+        cp_path = SUBMISSION_CSV.parent / f"submission_checkpoint_{cp_num}.csv"
+        if cp_path.exists():
+            cp_df = pd.read_csv(cp_path)
+            if len(cp_df) == cp_num:
+                results = cp_df.to_dict("records")
+                start_idx = cp_num
+                logger.info("Resuming from checkpoint: %d answers", start_idx)
+                break
 
     for idx, row in enumerate(tqdm(questions_df.iterrows(), total=total, desc="Generating")):
-        _, row = row  # Unpack from iterrows
+        if idx < start_idx:
+            continue
+        _, row = row
         q_id = str(row["q_id"])
         query = str(row["query"]).strip()
 
@@ -407,12 +421,11 @@ def run_pipeline(
         results.append({"q_id": q_id, "answer": answer})
         stats["generated"] += 1
 
-        # Чекпоинт каждые 2000 ответов
+        # Чекпоинт
         if (idx + 1) % CHECKPOINT_INTERVAL == 0:
             checkpoint_path = SUBMISSION_CSV.parent / f"submission_checkpoint_{idx + 1}.csv"
-            checkpoint_df = pd.DataFrame(results)
-            checkpoint_df.to_csv(checkpoint_path, index=False)
-            logger.info("Checkpoint saved: %s (%d rows)", checkpoint_path, len(results))
+            pd.DataFrame(results).to_csv(checkpoint_path, index=False)
+            logger.info("Checkpoint saved: %d answers", idx + 1)
 
     # ── Итоги ─────────────────────────────────────────────────
     logger.info(

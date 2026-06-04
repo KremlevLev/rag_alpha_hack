@@ -14,6 +14,7 @@ from typing import Any, Optional
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from tqdm import tqdm
 
 from config import (
     CHUNK_MAPPING_PATH,
@@ -213,24 +214,36 @@ class Indexer:
             )
 
         # ── Шаг 2: Нормализация текстов ───────────────────────
-        # Нормализуем только для эмбеддинга.
-        # В chunk_mapping сохраняем оригинальный текст —
-        # чтобы пользователь видел "счёт", а не "счет".
         texts_for_embedding = [
             normalize_for_embedding(chunk.text)
             for chunk in unique_chunks
         ]
 
-        # ── Шаг 3: Генерация эмбеддингов ──────────────────────
+        # ── Шаг 3: Генерация эмбеддингов (по батчам для экономии памяти) ──────────────────────
         logger.info("Generating embeddings for %d chunks", len(unique_chunks))
 
-        embeddings = self.model.encode(
-            texts_for_embedding,
-            batch_size=32,
-            show_progress_bar=True,
-            normalize_embeddings=True,
-        )
-        embeddings = embeddings.astype(np.float32)
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        batch_size = 8 if device == "cuda" else 32  # Маленький батч для GPU
+
+        all_embeddings = []
+        with tqdm(total=len(texts_for_embedding), desc="Embedding") as pbar:
+            for i in range(0, len(texts_for_embedding), batch_size):
+                batch = texts_for_embedding[i:i + batch_size]
+                batch_emb = self.model.encode(
+                    batch,
+                    batch_size=len(batch),
+                    show_progress_bar=False,
+                    normalize_embeddings=True,
+                    device=device,
+                )
+                all_embeddings.append(batch_emb)
+                pbar.update(len(batch))
+                # Очистка кэша GPU
+                if device == "cuda":
+                    torch.cuda.empty_cache()
+
+        embeddings = np.vstack(all_embeddings).astype(np.float32)
 
         # ── Шаг 4: FAISS индекс ───────────────────────────────
         dim = embeddings.shape[1]
@@ -244,17 +257,18 @@ class Indexer:
         )
 
         # ── Шаг 5: chunk_mapping (int ключи) ──────────────────
-        # Важно: FAISS присваивает ID по порядку добавления (0, 1, 2, ...).
-        # chunk.chunk_id из Chunk объекта НЕ совпадает с FAISS ID.
-        # Поэтому маппинг строим по faiss_id = enumerate индекса.
         self.chunk_mapping = {
             faiss_id: {
                 "web_id": chunk.web_id,
-                "text": chunk.text,          # оригинальный текст (с ё)
-                "chunk_id": chunk.chunk_id,  # оригинальный ID для трейсинга
+                "text": chunk.text,
+                "chunk_id": chunk.chunk_id,
             }
             for faiss_id, chunk in enumerate(unique_chunks)
         }
+
+        # Сохраняем индекс сразу после построения (защита от падения)
+        self.save()
+        logger.info("Index auto-saved after build")
 
     def save(self) -> None:
         """

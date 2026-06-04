@@ -280,7 +280,21 @@ def run_pipeline(
     stats = {"cached": 0, "generated": 0, "failed": 0, "invalid": 0}
     CHECKPOINT_INTERVAL = 2000
 
+    # Проверяем последний чекпоинт
+    start_idx = 0
+    for cp_num in [6000, 4000, 2000]:
+        cp_path = SUBMISSION_CSV.parent / f"submission_checkpoint_{cp_num}.csv"
+        if cp_path.exists():
+            cp_df = pd.read_csv(cp_path)
+            if len(cp_df) == cp_num:
+                results = cp_df.to_dict("records")
+                start_idx = cp_num
+                logger.info("Resuming from checkpoint: %d answers", start_idx)
+                break
+
     for idx, row in enumerate(tqdm(questions_df.iterrows(), total=total, desc="Generating")):
+        if idx < start_idx:
+            continue
         _, row = row
         q_id = str(row["q_id"])
         query = str(row["query"]).strip()
@@ -316,7 +330,7 @@ def run_pipeline(
         if (idx + 1) % CHECKPOINT_INTERVAL == 0:
             cp_path = SUBMISSION_CSV.parent / f"submission_checkpoint_{idx + 1}.csv"
             pd.DataFrame(results).to_csv(cp_path, index=False)
-            logger.info("Checkpoint: %s", cp_path)
+            logger.info("Checkpoint saved: %d answers", idx + 1)
 
     # Финал
     logger.info(
