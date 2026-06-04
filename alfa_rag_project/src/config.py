@@ -31,9 +31,9 @@ LLM_MODEL: Final[str] = "qwen2.5:7b"  # Default model, can be changed
 CHUNK_SIZE: Final[int] = 450  # Target chunk size in characters (3-5 sentences)
 CHUNK_OVERLAP: Final[int] = 100  # Overlap between chunks in characters
 
-# Retrieval parameters
-TOP_K_RETRIEVAL: Final[int] = 15  # Number of candidates from FAISS
-TOP_K_RERANK: Final[int] = 3  # Number of final results after reranking
+# Retrieval parameters - increased for better coverage
+TOP_K_RETRIEVAL: Final[int] = 20  # Number of candidates from FAISS (was 15)
+TOP_K_RERANK: Final[int] = 4  # Number of final results after reranking (was 3)
 
 # Generation parameters - optimized for BERT-Recall-L
 MAX_SENTENCES: Final[int] = 3  # Maximum sentences in answer (primary limit)
