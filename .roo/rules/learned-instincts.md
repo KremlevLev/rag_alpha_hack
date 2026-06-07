@@ -327,3 +327,26 @@ This file acts as a local memory bank for project-specific patterns, conventions
 - Qwen2.5-7B on Kaggle T4 with int8 was slower than expected
 - API-based inference (OR_main) more reliable for time-constrained competitions
 - Keep both implementations for different deployment scenarios
+
+---
+
+## 2026-06-07 - Added Vikhr-Llama-3.2-1B Model for Kaggle
+
+### Patterns Discovered
+- Vikhr-Llama-3.2-1B-instruct is a fast 1B parameter model optimized for Russian
+- 1B model uses significantly less VRAM than 7B/8B models, allowing larger reranker batches
+- Increased `RERANKER_BATCH_SIZE` from 10 to 15 for better throughput
+- Vikhr uses Llama-style chat template (same as Llama-3.2)
+
+### Conventions
+- `vikhr-1b` is now the default model in kaggle_main.py
+- `KAGGLE_MODELS` dictionary lists Vikhr first with "fast 1B model" comment
+- `KaggleGenerator.__init__` default changed to Vikhr model
+- `run_pipeline` default `llm_model` changed to "vikhr-1b"
+- CLI `--model` default changed to "vikhr-1b"
+
+### Gotchas
+- Vikhr-1B may have lower quality than 7B models but much faster inference
+- Model name in HuggingFace is "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct" (case-sensitive)
+- Chat template handling: Vikhr uses same template as Llama (apply_chat_template)
+- Answer extraction fallback still works for all models including Vikhr

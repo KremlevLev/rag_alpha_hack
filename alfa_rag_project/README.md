@@ -44,10 +44,11 @@ python main.py --build-index --model qwen2.5:7b
 ### Kaggle (kaggle_main.py) - Open-source models with 2x T4 GPU
 ```bash
 cd alfa_rag_project/src
-python kaggle_main.py --build-index --model qwen2.5-7b
+python kaggle_main.py --build-index --model vikhr-1b
 ```
 
 ### Available Kaggle models
+- `vikhr-1b` - Vikhrmodels/Vikhr-Llama-3.2-1B-instruct (fast, recommended for speed)
 - `qwen2.5-7b` - Qwen/Qwen2.5-7B-Instruct (recommended for Russian)
 - `qwen2-7b` - Qwen/Qwen2-7B-Instruct
 - `mistral-7b` - Mistral-7B-Instruct-v0.3
@@ -70,8 +71,8 @@ No model downloads - uses OpenRouter API for open-source models.
 
 ```
 questions.csv → Retriever → Generator → submission.csv
-                    ↓
-              FAISS + BM25 + Reranker
+                   ↓
+             FAISS + BM25 + Reranker
 ```
 
 ### Two-Stage Retrieval
@@ -108,7 +109,7 @@ Key parameters in `config.py`:
 | `TOP_K_RETRIEVAL` | 15 | FAISS candidates |
 | `TOP_K_BM25` | 15 | BM25 candidates |
 | `TOP_K_RERANK` | 10 | Final results after reranking |
-| `RERANKER_BATCH_SIZE` | 10 | Batch size for memory efficiency |
+| `RERANKER_BATCH_SIZE` | 15 | Batch size for memory efficiency (Vikhr-1B is smaller) |
 | `MAX_SENTENCES` | 2 | Maximum sentences in answer |
 | `MAX_RESPONSE_CHARS` | 150 | Hard safety limit (3x reference length) |
 
@@ -116,7 +117,7 @@ Key parameters in `config.py`:
 
 1. Clone repository in Kaggle notebook
 2. Install dependencies: `!pip install -r requirements.txt`
-3. Run: `python kaggle_main.py --build-index --model qwen2.5-7b`
+3. Run: `python kaggle_main.py --build-index --model vikhr-1b`
 4. Results saved to `data/submission.csv`
 
 **Note**: First run will download models (~1-2GB). Use pre-built index if available.
@@ -133,9 +134,9 @@ Pipeline saves checkpoints every 2000 answers:
 ## Memory Optimization
 
 For Kaggle 2x T4 (14.56 GiB VRAM):
-- `RERANKER_BATCH_SIZE=10` - Process 10 pairs at a time
+- `RERANKER_BATCH_SIZE=15` - Process 15 pairs at a time (Vikhr-1B is smaller, more memory available)
 - Batched reranking prevents CUDA OOM
-- Reduced `TOP_K_RETRIEVAL=5` and `TOP_K_BM25=5` for faster retrieval (optional)
+- `TOP_K_RETRIEVAL=15` and `TOP_K_BM25=15` for quality (can be reduced to 5 for speed)
 
 ## Module Details
 

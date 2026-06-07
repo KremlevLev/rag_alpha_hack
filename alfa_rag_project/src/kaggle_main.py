@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 # Open-source модели, совместимые с Kaggle
 KAGGLE_MODELS = {
+    "vikhr-1b": "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct",  # Fast 1B model, default choice
     "qwen2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
     "qwen2-7b": "Qwen/Qwen2-7B-Instruct",
     "mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
@@ -61,7 +62,7 @@ KAGGLE_MODELS = {
 }
 
 # Flag for int8 quantization (speeds up inference on T4 GPU)
-USE_INT8: bool = True
+USE_INT8: bool = False  # Disabled - was slower on Kaggle T4
 
 # System prompt для русскоязычных моделей с few-shot примерами
 SYSTEM_PROMPT = """Ты суровый банковский AI-аналитик. Отвечай на вопрос строго на основе предоставленного текста.
@@ -146,7 +147,7 @@ class KaggleGenerator:
 
     def __init__(
         self,
-        model_name: str = "Qwen/Qwen2.5-7B-Instruct",
+        model_name: str = "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct",
         device_map: str = "auto",
         torch_dtype: torch.dtype = torch.float16,
     ):
@@ -189,25 +190,13 @@ class KaggleGenerator:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # Model loading with int8 quantization for speed
+        # Model loading
         model_kwargs = {
             "device_map": device_map,
             "torch_dtype": torch_dtype,
             "trust_remote_code": True,
             "use_cache": True,
         }
-        
-        # Add int8 quantization for GPU (speeds up inference)
-        if USE_INT8 and num_gpus >= 1:
-            try:
-                from transformers import BitsAndBytesConfig
-                bnb_config = BitsAndBytesConfig(
-                    load_in_8bit=True,
-                )
-                model_kwargs["quantization_config"] = bnb_config
-                logger.info("Using int8 quantization for faster inference")
-            except ImportError:
-                logger.warning("bitsandbytes not available, using float16")
 
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -252,7 +241,7 @@ class KaggleGenerator:
                     tokenize=False,
                     add_generation_prompt=True,
                 )
-            elif "Llama" in self.model_name:
+            elif "Llama" in self.model_name or "Vikhr" in self.model_name:
                 prompt = self.tokenizer.apply_chat_template(
                     messages,
                     tokenize=False,
@@ -275,8 +264,8 @@ class KaggleGenerator:
 
             answer = outputs[0]["generated_text"]
 
-            # Убираем промпт из ответа (для Qwen/Llama)
-            if "Qwen" in self.model_name or "Llama" in self.model_name:
+            # Убираем промпт из ответа (для Qwen/Llama/Vikhr)
+            if "Qwen" in self.model_name or "Llama" in self.model_name or "Vikhr" in self.model_name:
                 # Ответ после последнего </
                 if "</" in answer:
                     answer = answer.split("</")[-1]
@@ -396,7 +385,7 @@ def validate_answer(query: str, answer: str, min_overlap: int = 1) -> bool:
 
 def run_pipeline(
     build_index: bool = False,
-    llm_model: str = "qwen2.5-7b",
+    llm_model: str = "vikhr-1b",
     cache_path: Path = Path("data/answer_cache.json"),
     validate_answers: bool = True,
     min_overlap: int = 1,
@@ -542,7 +531,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="qwen2.5-7b",
+        default="vikhr-1b",
         choices=list(KAGGLE_MODELS.keys()),
         help="LLM model (open-source, Hugging Face)",
     )

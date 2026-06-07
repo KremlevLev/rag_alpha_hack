@@ -37,7 +37,7 @@ TOP_K_BM25: Final[int] = 15  # Number of candidates from BM25
 TOP_K_RERANK: Final[int] = 10  # Number of final results after reranking
 
 # Reranker batch size for memory efficiency (prevents CUDA OOM)
-RERANKER_BATCH_SIZE: Final[int] = 10  # Process 10 pairs at a time (fits in 14GB GPU)
+RERANKER_BATCH_SIZE: Final[int] = 15  # Process 15 pairs at a time (Vikhr-1B is smaller, more memory available)
 
 # Generation parameters - optimized for BERT-Recall-L
 MAX_SENTENCES: Final[int] = 2  # Maximum sentences in answer (primary limit)
