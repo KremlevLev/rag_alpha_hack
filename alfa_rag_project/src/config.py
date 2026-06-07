@@ -36,6 +36,9 @@ TOP_K_RETRIEVAL: Final[int] = 15  # Number of candidates from FAISS
 TOP_K_BM25: Final[int] = 15  # Number of candidates from BM25
 TOP_K_RERANK: Final[int] = 10  # Number of final results after reranking
 
+# Reranker batch size for memory efficiency (prevents CUDA OOM)
+RERANKER_BATCH_SIZE: Final[int] = 4  # Process 4 pairs at a time
+
 # Generation parameters - optimized for BERT-Recall-L
 MAX_SENTENCES: Final[int] = 2  # Maximum sentences in answer (primary limit)
 MAX_RESPONSE_WORDS: Final[int] = 30  # Soft word limit for density

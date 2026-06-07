@@ -272,3 +272,24 @@ At the end of every successful task, record:
 - Reversing chunks may affect context coherence - but improves LLM attention
 - Few-shot examples should be in Russian to match model training
 - Need to ensure TOP_K_RERANK >= 4 to get enough candidates after merge
+
+---
+
+## 2026-06-07 - Fixed CUDA OOM in Cross-Encoder Reranking
+
+### Patterns Discovered
+- Cross-encoder reranker (BGE-reranker-v2-m3) requires ~7 GiB for batch of 20-30 pairs
+- Kaggle T4 GPU (14.56 GiB) runs out of memory when processing all candidates at once
+- Memory fragmentation from PyTorch causes "reserved but unallocated" memory waste
+- Exception handlers calling `get_context()` again cause double OOM on same query
+
+### Conventions
+- `RERANKER_BATCH_SIZE=4` in config.py for memory-efficient processing
+- Batched reranking in `retrieve()` with `torch.cuda.empty_cache()` after each batch
+- Exception handlers now use pre-fetched context instead of calling `get_context()` again
+
+### Gotchas
+- `sentence_transformers.CrossEncoder.predict()` supports `batch_size` parameter
+- Need to import `torch` in retriever.py for `empty_cache()` call
+- Error handling must avoid re-calling the failing function
+- GPU memory fragmentation is worse than actual usage - clear cache proactively

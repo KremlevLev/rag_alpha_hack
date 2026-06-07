@@ -13,7 +13,9 @@ import numpy as np
 from sentence_transformers import CrossEncoder
 from rank_bm25 import BM25Okapi
 
-from config import TOP_K_RETRIEVAL, TOP_K_RERANK, RERANKER_MODEL, TOP_K_BM25
+import torch
+
+from config import TOP_K_RETRIEVAL, TOP_K_RERANK, RERANKER_MODEL, TOP_K_BM25, RERANKER_BATCH_SIZE
 from indexer import Indexer
 
 logger = logging.getLogger(__name__)
@@ -396,11 +398,20 @@ class Retriever:
         
         if not merged_candidates:
             return []
+
+        # ── Stage 4: Cross-encoder reranking (batched for memory efficiency) ───────────────────────────────
+        # Process in small batches to avoid CUDA OOM with large reranker model
+        all_pairs = [(query, text) for _, text in merged_candidates]
+        rerank_scores = []
         
-        # ── Stage 4: Cross-encoder reranking ───────────────────────────────
-        rerank_scores = self.reranker.predict(
-            [(query, text) for _, text in merged_candidates]
-        )
+        for i in range(0, len(all_pairs), RERANKER_BATCH_SIZE):
+            batch = all_pairs[i:i + RERANKER_BATCH_SIZE]
+            batch_scores = self.reranker.predict(batch)
+            rerank_scores.extend(batch_scores.tolist() if hasattr(batch_scores, 'tolist') else list(batch_scores))
+            
+            # Clear GPU cache after each batch to prevent memory fragmentation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         
         top_indices = np.argsort(rerank_scores)[::-1][:TOP_K_RERANK]
         

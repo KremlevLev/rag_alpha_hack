@@ -453,12 +453,15 @@ def run_pipeline(
             continue
 
         # Шаг 2: Retrieval + Generation
+        context = None
         try:
             context = retriever.get_context(query)
             answer = generator.generate(query, context)
         except Exception as e:
             logger.error("Failed to process q_id=%s: %s", q_id, e, exc_info=True)
-            answer = extract_answer_from_context(query, retriever.get_context(query))
+            # Use already-retrieved context if available, otherwise empty string
+            # (don't call get_context again - it will fail with same error)
+            answer = extract_answer_from_context(query, context or "")
             stats["failed"] += 1
 
         # Шаг 3: Валидация
