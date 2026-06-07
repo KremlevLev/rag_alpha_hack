@@ -47,7 +47,6 @@ data/submission_test.csv
 data/analysis_first_50.csv
 data/submission (3).csv
 data/submission (4).csv
-data/sample_submission.csv
 
 # Model cache (Hugging Face)
 .cache/huggingface/
