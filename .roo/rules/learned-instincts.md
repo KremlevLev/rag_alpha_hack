@@ -305,3 +305,25 @@ This file acts as a local memory bank for project-specific patterns, conventions
 - May slightly reduce answer quality but acceptable for speed
 - Need to ensure enough candidates after merge (5+5=10, still enough for reranking)
 - Qwen recommended for Russian banking context due to better instruction following
+
+---
+
+## 2026-06-07 - Reverted to Quality-Optimized Parameters
+
+### Patterns Discovered
+- Reduced retrieval parameters (15→5) degraded answer quality significantly
+- int8 quantization on Kaggle T4 caused 10-12s per question (slower than expected)
+- OR_main.py (OpenRouter API) provides better quality with acceptable speed
+- Quality is more important than speed for leaderboard score
+
+### Conventions
+- `TOP_K_RETRIEVAL=15` and `TOP_K_BM25=15` restored for better recall
+- `TOP_K_RERANK=10` for more candidates after merge
+- Using OR_main.py for production inference via OpenRouter API
+- kaggle_main.py kept as fallback for offline scenarios
+
+### Gotchas
+- int8 quantization may not work well with all model architectures
+- Qwen2.5-7B on Kaggle T4 with int8 was slower than expected
+- API-based inference (OR_main) more reliable for time-constrained competitions
+- Keep both implementations for different deployment scenarios

@@ -105,9 +105,9 @@ Key parameters in `config.py`:
 |-----------|-------|-------------|
 | `CHUNK_SIZE` | 450 | Target chunk size in characters (3-5 sentences) |
 | `CHUNK_OVERLAP` | 100 | Overlap between chunks in characters |
-| `TOP_K_RETRIEVAL` | 5 | FAISS candidates (reduced for speed) |
-| `TOP_K_BM25` | 5 | BM25 candidates (reduced for speed) |
-| `TOP_K_RERANK` | 3 | Final results after reranking |
+| `TOP_K_RETRIEVAL` | 15 | FAISS candidates |
+| `TOP_K_BM25` | 15 | BM25 candidates |
+| `TOP_K_RERANK` | 10 | Final results after reranking |
 | `RERANKER_BATCH_SIZE` | 10 | Batch size for memory efficiency |
 | `MAX_SENTENCES` | 2 | Maximum sentences in answer |
 | `MAX_RESPONSE_CHARS` | 150 | Hard safety limit (3x reference length) |
@@ -130,13 +130,12 @@ Pipeline saves checkpoints every 2000 answers:
 
 **Auto-resume:** Pipeline automatically resumes from the last checkpoint on restart.
 
-## Performance Optimization
+## Memory Optimization
 
 For Kaggle 2x T4 (14.56 GiB VRAM):
 - `RERANKER_BATCH_SIZE=10` - Process 10 pairs at a time
-- `load_in_8bit=True` - int8 quantization speeds up inference
 - Batched reranking prevents CUDA OOM
-- Reduced `TOP_K_RETRIEVAL=5` and `TOP_K_BM25=5` for faster retrieval
+- Reduced `TOP_K_RETRIEVAL=5` and `TOP_K_BM25=5` for faster retrieval (optional)
 
 ## Module Details
 
