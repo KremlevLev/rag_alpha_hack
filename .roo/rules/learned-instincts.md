@@ -350,3 +350,31 @@ This file acts as a local memory bank for project-specific patterns, conventions
 - Model name in HuggingFace is "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct" (case-sensitive)
 - Chat template handling: Vikhr uses same template as Llama (apply_chat_template)
 - Answer extraction fallback still works for all models including Vikhr
+
+---
+
+## 2026-06-07 - Created LoRA/QLoRA Fine-tuning Module
+
+### Patterns Discovered
+- `create_finetuning_dataset()` merges questions.csv and sample_submission.csv into chat format
+- Dataset uses "messages" format with system/user/assistant roles
+- QLoRA uses 4-bit NF4 quantization with double quantization for memory efficiency
+- LoRA targets attention and MLP layers: q_proj, v_proj, k_proj, o_proj, gate_proj, up_proj, down_proj
+- Training uses standard HuggingFace Trainer with causal LM objective
+
+### Conventions
+- `FinetuningConfig` dataclass for all training hyperparameters
+- `use_qlora=True` by default for memory-efficient training on Kaggle T4
+- Dataset saved to `data/finetuning_dataset.json` (6977 examples)
+- Fine-tuned models saved to `data/finetuned_models/`
+- Chat template applied via `tokenizer.apply_chat_template()` for model compatibility
+- `FINETUNING_MODELS` dict maps short names to full HuggingFace IDs
+
+### Gotchas
+- Need to set `use_cache=False` in model config for training
+- Labels for causal LM = input_ids (not shifted)
+- QLoRA requires `prepare_model_for_kbit_training()` before applying LoRA
+- `peft` and `trl` packages required for fine-tuning
+- Model must be loaded with `trust_remote_code=True` for custom architectures
+- `padding='max_length'` required in tokenization to avoid ValueError with variable lengths
+- `warmup_ratio` deprecated in v5.2, use `warmup_steps` instead
