@@ -25,6 +25,19 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────
+# Model aliases (same as kaggle_main.py)
+# ─────────────────────────────────────────────
+
+FINETUNING_MODELS = {
+    "vikhr-1b": "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct",  # Fast 1B model, default choice
+    "qwen2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
+    "qwen2-7b": "Qwen/Qwen2-7B-Instruct",
+    "mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
+    "llama3-8b": "meta-llama/Meta-Llama-3-8B-Instruct",
+}
+
+
+# ─────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────
 
@@ -364,8 +377,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="Vikhrmodels/Vikhr-Llama-3.2-1B-instruct",
-        help="Model name for fine-tuning",
+        default="vikhr-1b",
+        choices=list(FINETUNING_MODELS.keys()),
+        help="Model alias for fine-tuning (vikhr-1b, qwen2.5-7b, etc.)",
     )
     parser.add_argument(
         "--epochs",
@@ -409,8 +423,11 @@ if __name__ == "__main__":
         create_finetuning_dataset()
     
     if args.train:
+        # Resolve model alias to full HuggingFace ID
+        hf_model_name = FINETUNING_MODELS.get(args.model, args.model)
+        
         config = FinetuningConfig(
-            model_name=args.model,
+            model_name=hf_model_name,
             num_train_epochs=args.epochs,
             per_device_train_batch_size=args.batch_size,
             learning_rate=args.lr,
