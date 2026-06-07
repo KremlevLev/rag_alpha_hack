@@ -257,12 +257,12 @@ def format_chat_for_training(
         for msg in messages:
             text += f"{msg['role']}: {msg['content']}\n\n"
     
-    # Tokenize
+    # Tokenize with padding to max_length
     tokenized = tokenizer(
         text,
         truncation=True,
         max_length=max_length,
-        padding=False,
+        padding="max_length",
     )
     
     return {
@@ -318,7 +318,7 @@ def train(
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         learning_rate=config.learning_rate,
         max_grad_norm=config.max_grad_norm,
-        warmup_ratio=0.03,
+        warmup_steps=10,  # Fixed: use warmup_steps instead of deprecated warmup_ratio
         lr_scheduler_type="cosine",
         logging_steps=10,
         save_strategy="epoch",
@@ -328,7 +328,7 @@ def train(
         bf16=config.use_qlora,  # Use bf16 for QLoRA
     )
     
-    # Data collator
+    # Data collator - use padding_side="right" which is already set
     data_collator = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm=False,  # Causal LM, not masked LM
