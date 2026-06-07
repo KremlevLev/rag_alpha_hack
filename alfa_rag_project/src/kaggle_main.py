@@ -199,8 +199,15 @@ class KaggleGenerator:
         
         # Add int8 quantization for GPU (speeds up inference)
         if USE_INT8 and num_gpus >= 1:
-            model_kwargs["load_in_8bit"] = True
-            logger.info("Using int8 quantization for faster inference")
+            try:
+                from transformers import BitsAndBytesConfig
+                bnb_config = BitsAndBytesConfig(
+                    load_in_8bit=True,
+                )
+                model_kwargs["quantization_config"] = bnb_config
+                logger.info("Using int8 quantization for faster inference")
+            except ImportError:
+                logger.warning("bitsandbytes not available, using float16")
 
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
