@@ -23,6 +23,7 @@ alfa_rag_project/
     ├── main.py         # Pipeline orchestrator (Ollama/local)
     ├── kaggle_main.py  # Kaggle-optimized pipeline (Hugging Face)
     ├── OR_main.py      # OpenRouter API pipeline
+    ├── finetuning.py   # LoRA/QLoRA fine-tuning module
     ├── __main__.py     # Entry point for `python -m main`
     └── __init__.py     # Package exports
 ```
@@ -53,6 +54,26 @@ python kaggle_main.py --build-index --model vikhr-1b
 - `qwen2-7b` - Qwen/Qwen2-7B-Instruct
 - `mistral-7b` - Mistral-7B-Instruct-v0.3
 - `llama3-8b` - Meta-Llama-3-8B-Instruct
+
+### Fine-tuning with LoRA/QLoRA
+
+Create a fine-tuning dataset from sample_submission.csv (75.8 score baseline):
+
+```bash
+python finetuning.py --create-dataset
+```
+
+Run LoRA/QLoRA fine-tuning:
+
+```bash
+# QLoRA (4-bit quantization, memory efficient)
+python finetuning.py --train --model vikhr-1b --epochs 3 --batch-size 4
+
+# Regular LoRA (full precision)
+python finetuning.py --train --model vikhr-1b --epochs 3 --batch-size 4 --no-qlora
+```
+
+The fine-tuned model will be saved to `data/finetuned_models/` and can be used for inference.
 
 ### OpenRouter (OR_main.py) - API-based inference
 ```bash
@@ -165,6 +186,12 @@ Centralized configuration with all paths, model names, and hyperparameters.
 - `extract_answer_from_context()` - fallback extraction with TF-IDF scoring
 - `truncate_to_sentences()` - primary truncation (BERT-Recall-L)
 - `truncate_to_chars()` - safety truncation
+
+### finetuning.py
+- `create_finetuning_dataset()` - creates QA dataset from questions + sample_submission
+- `load_model_for_finetuning()` - loads model with LoRA/QLoRA
+- `train()` - runs supervised fine-tuning
+- Supports QLoRA (4-bit) and regular LoRA
 
 ### main.py / kaggle_main.py / OR_main.py
 - Three entry points for different environments

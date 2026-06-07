@@ -41,11 +41,13 @@ env/
 data/faiss_index.bin
 data/chunk_mapping.json
 data/answer_cache.json
+data/finetuning_dataset.json
 data/submission_checkpoint_*.csv
 data/submission_test.csv
 data/analysis_first_50.csv
 data/submission (3).csv
 data/submission (4).csv
+data/sample_submission.csv
 
 # Model cache (Hugging Face)
 .cache/huggingface/
