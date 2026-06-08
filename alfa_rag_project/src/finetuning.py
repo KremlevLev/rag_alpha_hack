@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 FINETUNING_MODELS = {
-    "vikhr-1b": "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct",  # Fast 1B model, default choice
+    "vikhr-1b-finetuned": "lirex111/vikhrllama1B_AlfaBank",  # Fine-tuned Vikhr-1B for Alfa-Bank (RECOMMENDED)
+    "vikhr-1b": "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct",  # Base 1B model
     "qwen2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
     "qwen2-7b": "Qwen/Qwen2-7B-Instruct",
     "mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",

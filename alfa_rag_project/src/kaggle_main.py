@@ -54,7 +54,8 @@ logger = logging.getLogger(__name__)
 
 # Open-source модели, совместимые с Kaggle
 KAGGLE_MODELS = {
-    "vikhr-1b": "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct",  # Fast 1B model, default choice
+    "vikhr-1b-finetuned": "lirex111/vikhrllama1B_AlfaBank",  # Fine-tuned Vikhr-1B for Alfa-Bank (RECOMMENDED)
+    "vikhr-1b": "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct",  # Base 1B model
     "qwen2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
     "qwen2-7b": "Qwen/Qwen2-7B-Instruct",
     "mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
@@ -147,7 +148,7 @@ class KaggleGenerator:
 
     def __init__(
         self,
-        model_name: str = "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct",
+        model_name: str = "lirex111/vikhrllama1B_AlfaBank",
         device_map: str = "auto",
         torch_dtype: torch.dtype = torch.float16,
     ):
@@ -241,7 +242,7 @@ class KaggleGenerator:
                     tokenize=False,
                     add_generation_prompt=True,
                 )
-            elif "Llama" in self.model_name or "Vikhr" in self.model_name:
+            elif "Llama" in self.model_name or "Vikhr" in self.model_name or "vikhr" in self.model_name:
                 prompt = self.tokenizer.apply_chat_template(
                     messages,
                     tokenize=False,
@@ -265,7 +266,7 @@ class KaggleGenerator:
             answer = outputs[0]["generated_text"]
 
             # Убираем промпт из ответа (для Qwen/Llama/Vikhr)
-            if "Qwen" in self.model_name or "Llama" in self.model_name or "Vikhr" in self.model_name:
+            if "Qwen" in self.model_name or "Llama" in self.model_name or "Vikhr" in self.model_name or "vikhr" in self.model_name:
                 # Ответ после последнего </
                 if "</" in answer:
                     answer = answer.split("</")[-1]
@@ -385,7 +386,7 @@ def validate_answer(query: str, answer: str, min_overlap: int = 1) -> bool:
 
 def run_pipeline(
     build_index: bool = False,
-    llm_model: str = "vikhr-1b",
+    llm_model: str = "vikhr-1b-finetuned",
     cache_path: Path = Path("data/answer_cache.json"),
     validate_answers: bool = True,
     min_overlap: int = 1,
@@ -531,7 +532,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="vikhr-1b",
+        default="vikhr-1b-finetuned",
         choices=list(KAGGLE_MODELS.keys()),
         help="LLM model (open-source, Hugging Face)",
     )
