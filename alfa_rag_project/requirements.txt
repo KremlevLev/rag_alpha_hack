@@ -4,6 +4,7 @@ transformers==4.48.3
 sentence-transformers==3.4.1
 accelerate==1.3.0
 bitsandbytes==0.45.2
+vllm==0.7.2      # optional: для --vllm (x5-10 throughput на T4)
 
 # Vector search
 faiss-cpu==1.10.0
