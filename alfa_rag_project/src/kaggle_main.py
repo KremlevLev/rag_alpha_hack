@@ -627,8 +627,17 @@ def run_pipeline(
 
     # ── Generator ─────────────────────────────────────────────
     hf_model_name = KAGGLE_MODELS.get(llm_model, llm_model)
+
+    # vLLM не умеет читать конфиг fine-tuned модели lirex111/vikhrllama1B_AlfaBank
+    # Поэтому для vLLM используем base Vikhr, а fine-tuned оставляем для HF-режима.
+    if use_vllm and llm_model == "vikhr-1b-finetuned":
+        vllm_model_name = "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct"
+        logger.info("Using base Vikhr for vLLM: %s", vllm_model_name)
+    else:
+        vllm_model_name = hf_model_name
+
     if use_vllm:
-        generator = VLLMGenerator(model_name=hf_model_name)
+        generator = VLLMGenerator(model_name=vllm_model_name)
         logger.info("Using vLLM generator (x5-10 throughput on T4)")
     else:
         generator = KaggleGenerator(model_name=hf_model_name)
