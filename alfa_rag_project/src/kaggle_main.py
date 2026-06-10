@@ -353,8 +353,12 @@ class VLLMGenerator:
             )
 
         logger.info("Loading VLLM model: %s", model_name)
+        # FIX: merged model имеет сломанный tokenizer_config (TokenizersBackend).
+        # Поэтому для vLLM явно задаём tokenizer от base Vikhr.
+        tokenizer_id = "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct"
         self.llm = LLM(
             model=model_name,
+            tokenizer=tokenizer_id,
             dtype="float16",
             trust_remote_code=True,
             gpu_memory_utilization=0.55,  # 0.55 — максимум 8GB из 14.56 (было 0.85 — OOM)
