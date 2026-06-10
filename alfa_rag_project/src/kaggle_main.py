@@ -338,10 +338,12 @@ class VLLMGenerator:
     def __init__(
         self,
         model_name: str = "lirex111/vikhrllama1B_AlfaBank",
+        fast_gpu: bool = False,
     ):
         """
         Args:
             model_name: Hugging Face model identifier.
+            fast_gpu: Режим для одной L4 (24GB) — больше памяти под vLLM
         """
         self.model_name = model_name
 
@@ -356,12 +358,13 @@ class VLLMGenerator:
         # FIX: merged model имеет сломанный tokenizer_config (TokenizersBackend).
         # Поэтому для vLLM явно задаём tokenizer от base Vikhr.
         tokenizer_id = "Vikhrmodels/Vikhr-Llama-3.2-1B-instruct"
+        gpu_memory_utilization = 0.80 if fast_gpu else 0.55
         self.llm = LLM(
             model=model_name,
             tokenizer=tokenizer_id,
             dtype="float16",
             trust_remote_code=True,
-            gpu_memory_utilization=0.55,  # 0.55 — максимум 8GB из 14.56 (было 0.85 — OOM)
+            gpu_memory_utilization=gpu_memory_utilization,
             max_model_len=4096,           # достаточно для контекста + ответа
         )
 
@@ -590,6 +593,7 @@ def run_pipeline(
     min_overlap: int = 1,
     use_vllm: bool = False,
     vllm_batch_size: int = 8,
+    fast_gpu: bool = False,
 ) -> None:
     """
     Запускает полный RAG pipeline для Kaggle.
@@ -602,6 +606,7 @@ def run_pipeline(
         min_overlap: Минимальный overlap слов
         use_vllm: Использовать vLLM вместо HF pipeline (×5-10 throughput на T4)
         vllm_batch_size: Размер батча для vLLM continuous batching
+        fast_gpu: Режим для одной L4 (24GB) — больше памяти под vLLM
     """
     # ── Индекс ────────────────────────────────────────────────
     if build_index or not INDEX_PATH.exists():
@@ -643,8 +648,11 @@ def run_pipeline(
         vllm_model_name = hf_model_name
 
     if use_vllm:
-        generator = VLLMGenerator(model_name=vllm_model_name)
-        logger.info("Using vLLM generator (x5-10 throughput on T4)")
+        generator = VLLMGenerator(model_name=vllm_model_name, fast_gpu=fast_gpu)
+        if fast_gpu:
+            logger.info("Using vLLM generator on fastGPU/L4 mode (gpu_memory_utilization=0.80)")
+        else:
+            logger.info("Using vLLM generator (x5-10 throughput on T4)")
     else:
         generator = KaggleGenerator(model_name=hf_model_name)
 
@@ -681,60 +689,176 @@ def run_pipeline(
     # FIX-6: резюм по q_id, а не по индексу (надёжнее)
     done_ids = {str(r["q_id"]) for r in results}
 
-    for _, row in tqdm(questions_df.iterrows(), total=total, desc="Generating"):
-        q_id = str(row["q_id"])
-        if q_id in done_ids:
-            continue
-        query = str(row["query"]).strip()
+    # ── VLLM batching (continuous batching) ─────────────────
+    if use_vllm:
+        batch_queries: list[str] = []
+        batch_q_ids: list[str] = []
+        batch_contexts: list[str] = []
 
-        # Шаг 1: Проверяем кеш
-        cached_answer = cache.get(query, hf_model_name)
-        if cached_answer is not None:
-            results.append({"q_id": q_id, "answer_new": cached_answer})
-            stats["cached"] += 1
-            continue
+        def process_batch() -> None:
+            if not batch_queries:
+                return
 
-        # Шаг 2: Retrieval + Generation
-        context = None
-        try:
-            context = retriever.get_context(query)
-            answer = generator.generate(query, context)
-        except Exception as e:
-            logger.error("Failed to process q_id=%s: %s", q_id, e, exc_info=True)
-            answer = extract_answer_from_context(query, context or "")
-            if not answer:  # если контекст был пустым — "Нет ответа."
-                answer = "Нет ответа."
-            stats["failed"] += 1
+            try:
+                answers = generator.generate_batch(batch_queries, batch_contexts)
+                for q_id, query, context, answer in zip(batch_q_ids, batch_queries, batch_contexts, answers):
+                    # Шаг 3: Валидация
+                    if validate_answers and answer:
+                        if not validate_answer(query, answer, min_overlap):
+                            fb = extract_answer_from_context(query, context or "")
+                            if fb and validate_answer(query, fb, min_overlap):
+                                logger.warning(
+                                    "Invalid answer for q_id=%s — fallback applied", q_id,
+                                )
+                                answer = fb
+                            else:
+                                logger.warning(
+                                    "Invalid answer for q_id=%s — no valid fallback, keeping original",
+                                    q_id,
+                                )
+                            stats["invalid"] += 1
 
-        # Шаг 3: Валидация (FIX-3: теперь она ДЕЙСТВУЕТ — заменяет плохой ответ на fallback)
-        if validate_answers and answer:
-            if not validate_answer(query, answer, min_overlap):
-                fb = extract_answer_from_context(query, context or "")
-                if fb and validate_answer(query, fb, min_overlap):
-                    logger.warning(
-                        "Invalid answer for q_id=%s — fallback applied", q_id,
-                    )
-                    answer = fb
-                else:
-                    logger.warning(
-                        "Invalid answer for q_id=%s — no valid fallback, keeping original",
-                        q_id,
-                    )
-                stats["invalid"] += 1
+                    # Шаг 4: Кешируем
+                    if answer:
+                        cache.set(query, hf_model_name, q_id, answer)
 
-        # Шаг 4: Кешируем (без немедленной записи на диск)
-        if answer:
-            cache.set(query, hf_model_name, q_id, answer)
+                    results.append({"q_id": q_id, "answer_new": answer})
+                    stats["generated"] += 1
 
-        results.append({"q_id": q_id, "answer_new": answer})
-        stats["generated"] += 1
+            except Exception as e:
+                logger.error("Batch generation failed: %s", e, exc_info=True)
+                # Fallback to per-question processing
+                for q_id, query, context in zip(batch_q_ids, batch_queries, batch_contexts):
+                    try:
+                        answer = generator.generate(query, context)
+                    except Exception as inner_e:
+                        logger.error("Failed to process q_id=%s: %s", q_id, inner_e, exc_info=True)
+                        answer = extract_answer_from_context(query, context or "")
+                        if not answer:
+                            answer = "Нет ответа."
+                        stats["failed"] += 1
 
-        # Чекпоинт + батч-сохранение кеша
-        if (len(results)) % CHECKPOINT_INTERVAL == 0:
-            checkpoint_path = SUBMISSION_CSV.parent / f"submission_checkpoint_{len(results)}.csv"
-            pd.DataFrame(results).to_csv(checkpoint_path, index=False)
-            cache.save()  # FIX-4: пишем кеш раз в 2000 вопросов
-            logger.info("Checkpoint saved: %d answers", len(results))
+                    if validate_answers and answer:
+                        if not validate_answer(query, answer, min_overlap):
+                            fb = extract_answer_from_context(query, context or "")
+                            if fb and validate_answer(query, fb, min_overlap):
+                                logger.warning(
+                                    "Invalid answer for q_id=%s — fallback applied", q_id,
+                                )
+                                answer = fb
+                            else:
+                                logger.warning(
+                                    "Invalid answer for q_id=%s — no valid fallback, keeping original",
+                                    q_id,
+                                )
+                            stats["invalid"] += 1
+
+                    if answer:
+                        cache.set(query, hf_model_name, q_id, answer)
+
+                    results.append({"q_id": q_id, "answer_new": answer})
+                    stats["generated"] += 1
+
+            # Чекпоинт + батч-сохранение кеша
+            if (len(results)) % CHECKPOINT_INTERVAL == 0:
+                checkpoint_path = SUBMISSION_CSV.parent / f"submission_checkpoint_{len(results)}.csv"
+                pd.DataFrame(results).to_csv(checkpoint_path, index=False)
+                cache.save()
+                logger.info("Checkpoint saved: %d answers", len(results))
+
+            batch_queries.clear()
+            batch_q_ids.clear()
+            batch_contexts.clear()
+
+        for _, row in tqdm(questions_df.iterrows(), total=total, desc="Generating"):
+            q_id = str(row["q_id"])
+            if q_id in done_ids:
+                continue
+            query = str(row["query"]).strip()
+
+            # Шаг 1: Проверяем кеш
+            cached_answer = cache.get(query, hf_model_name)
+            if cached_answer is not None:
+                results.append({"q_id": q_id, "answer_new": cached_answer})
+                stats["cached"] += 1
+                continue
+
+            # Шаг 2: Retrieval
+            context = None
+            try:
+                context = retriever.get_context(query)
+            except Exception as e:
+                logger.error("Retrieval failed for q_id=%s: %s", q_id, e, exc_info=True)
+                context = ""
+                stats["failed"] += 1
+
+            batch_queries.append(query)
+            batch_q_ids.append(q_id)
+            batch_contexts.append(context)
+
+            # Flush batch when full
+            if len(batch_queries) >= vllm_batch_size:
+                process_batch()
+
+        # Flush remaining batch
+        process_batch()
+
+    else:
+        # ── HF pipeline (old per-question loop) ─────────────────
+        for _, row in tqdm(questions_df.iterrows(), total=total, desc="Generating"):
+            q_id = str(row["q_id"])
+            if q_id in done_ids:
+                continue
+            query = str(row["query"]).strip()
+
+            # Шаг 1: Проверяем кеш
+            cached_answer = cache.get(query, hf_model_name)
+            if cached_answer is not None:
+                results.append({"q_id": q_id, "answer_new": cached_answer})
+                stats["cached"] += 1
+                continue
+
+            # Шаг 2: Retrieval + Generation
+            context = None
+            try:
+                context = retriever.get_context(query)
+                answer = generator.generate(query, context)
+            except Exception as e:
+                logger.error("Failed to process q_id=%s: %s", q_id, e, exc_info=True)
+                answer = extract_answer_from_context(query, context or "")
+                if not answer:  # если контекст был пустым — "Нет ответа."
+                    answer = "Нет ответа."
+                stats["failed"] += 1
+
+            # Шаг 3: Валидация
+            if validate_answers and answer:
+                if not validate_answer(query, answer, min_overlap):
+                    fb = extract_answer_from_context(query, context or "")
+                    if fb and validate_answer(query, fb, min_overlap):
+                        logger.warning(
+                            "Invalid answer for q_id=%s — fallback applied", q_id,
+                        )
+                        answer = fb
+                    else:
+                        logger.warning(
+                            "Invalid answer for q_id=%s — no valid fallback, keeping original",
+                            q_id,
+                        )
+                    stats["invalid"] += 1
+
+            # Шаг 4: Кешируем
+            if answer:
+                cache.set(query, hf_model_name, q_id, answer)
+
+            results.append({"q_id": q_id, "answer_new": answer})
+            stats["generated"] += 1
+
+            # Чекпоинт + батч-сохранение кеша
+            if (len(results)) % CHECKPOINT_INTERVAL == 0:
+                checkpoint_path = SUBMISSION_CSV.parent / f"submission_checkpoint_{len(results)}.csv"
+                pd.DataFrame(results).to_csv(checkpoint_path, index=False)
+                cache.save()
+                logger.info("Checkpoint saved: %d answers", len(results))
 
     # ── Итоги ─────────────────────────────────────────────────
     logger.info(
@@ -803,6 +927,11 @@ if __name__ == "__main__":
         default=8,
         help="Batch size for vLLM continuous batching (default: 8)",
     )
+    parser.add_argument(
+        "--fastGPU",
+        action="store_true",
+        help="Single L4 mode (24GB): increase vLLM gpu_memory_utilization to 0.80",
+    )
 
     args = parser.parse_args()
 
@@ -814,4 +943,5 @@ if __name__ == "__main__":
         min_overlap=args.min_overlap,
         use_vllm=args.vllm,
         vllm_batch_size=args.vllm_batch_size,
+        fast_gpu=args.fastGPU,
     )
