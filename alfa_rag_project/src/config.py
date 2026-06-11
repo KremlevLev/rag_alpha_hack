@@ -28,13 +28,13 @@ LLM_BASE_URL: Final[str] = "http://localhost:11434/v1"
 LLM_MODEL: Final[str] = "qwen2.5:7b"  # Default model, can be changed
 
 # Chunking parameters - optimized for context density
-CHUNK_SIZE: Final[int] = 450  # Target chunk size in characters (3-5 sentences)
-CHUNK_OVERLAP: Final[int] = 100  # Overlap between chunks in characters
+CHUNK_SIZE: Final[int] = 500  # Target chunk size in characters (3-5 sentences)
+CHUNK_OVERLAP: Final[int] = 120  # Overlap between chunks in characters
 
 # Retrieval parameters - optimized for quality
 TOP_K_RETRIEVAL: Final[int] = 40  # Number of candidates from FAISS
 TOP_K_BM25: Final[int] = 15  # Number of candidates from BM25
-TOP_K_RERANK: Final[int] = 10  # Number of final results after reranking
+TOP_K_RERANK: Final[int] = 15  # Number of final results after reranking
 
 # Reranker batch size for memory efficiency (prevents CUDA OOM)
 RERANKER_BATCH_SIZE: Final[int] = 4  # 4 — агрессивно мало для 2xT4 (было 15 — OOM)
@@ -47,10 +47,10 @@ MIN_RERANK_SCORE: Final[float] = 0.05
 # Generation parameters - optimized for BERT-Recall-L
 # Эталоны (sample_submission.csv) имеют медиану ~200-280 символов, max 700+.
 # Порог без штрафа = 1.5 * Lr. Цель: покрыть recall, не уходя в 3x.
-# 500 символов сидит между 1.5xLr (~350-400) и 3xLr (~700-800).
+# 550 символов сидит между 1.5xLr (~350-400) и 3xLr (~700-800).
 MAX_SENTENCES: Final[int] = 5          # было 2 — душило recall на длинных эталонах
 MAX_RESPONSE_WORDS: Final[int] = 80    # было 30
-MAX_RESPONSE_CHARS: Final[int] = 500   # было 150 — главная утечка скора
+MAX_RESPONSE_CHARS: Final[int] = 550   # было 150 — главная утечка скора
 TEMPERATURE: Final[float] = 0.1  # Low temperature for deterministic output
 
 # API timeout
