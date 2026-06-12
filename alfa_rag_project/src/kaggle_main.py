@@ -383,11 +383,12 @@ class VLLMGenerator:
         """Build prompt from query and context using chat template."""
         # FIX: truncate context to avoid vLLM max_seq_len=4096 overflow
         # 4254 tokens warning means context is too long
-        if len(context) > 2500:
-            context = context[:2500]
+        # Increased from 2500 to 3200 to preserve more context for quality
+        if len(context) > 3200:
+            context = context[:3200]
             # Try to end at sentence boundary
             last_punct = max(context.rfind("."), context.rfind("!"), context.rfind("?"), context.rfind("»"))
-            if last_punct > 1500:
+            if last_punct > 2200:
                 context = context[:last_punct + 1]
 
         messages = [

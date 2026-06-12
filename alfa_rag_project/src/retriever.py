@@ -501,8 +501,9 @@ class Retriever:
         context_parts = head + tail[::-1]
         
         # FIX-G5: нумеруем фрагменты для cross-attention модели
+        # Добавляем явный header, чтобы модель понимала структуру контекста
         labeled = [f"[Фрагмент {i+1}] {p}" for i, p in enumerate(context_parts)]
-        return "\n\n".join(labeled)
+        return "Контекст для ответа на вопрос:\n\n" + "\n\n".join(labeled)
 
 
 # ─────────────────────────────────────────────

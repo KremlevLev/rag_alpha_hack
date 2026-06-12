@@ -429,8 +429,8 @@ def chunk_all_websites(websites_data: List[Tuple[int, str]]) -> List[Chunk]:
         List of clean Chunk objects with unique sequential IDs.
     """
     chunker = Chunker(ChunkerConfig(
-        chunk_size=650,        # FIX-C2: цельный FAQ-ответ влезает в один чанк
-        chunk_overlap=120,
+        chunk_size=CHUNK_SIZE,  # FIX-C2: цельный FAQ-ответ влезает в один чанк
+        chunk_overlap=CHUNK_OVERLAP,
         min_chunk_length=40,
     ))
     all_chunks: List[Chunk] = []
