@@ -708,6 +708,7 @@ def run_pipeline(
     use_vllm: bool = False,
     vllm_batch_size: int = 8,
     fast_gpu: bool = False,
+    fast_quality: bool = False,
 ) -> None:
     """
     Запускает полный RAG pipeline для Kaggle.
@@ -722,6 +723,14 @@ def run_pipeline(
         vllm_batch_size: Размер батча для vLLM continuous batching
         fast_gpu: Режим для одной L4 (24GB) — больше памяти под vLLM
     """
+    # ── Fast quality mode ────────────────────────────────────
+    if fast_quality:
+        logger.info("Fast quality mode enabled: fewer candidates + stronger model")
+        if llm_model == "vikhr-1b-finetuned":
+            llm_model = "qwen2.5-7b"
+        use_vllm = True
+        vllm_batch_size = max(vllm_batch_size, 16)
+
     # ── Индекс ────────────────────────────────────────────────
     if build_index or not INDEX_PATH.exists():
         logger.info("Building index from scratch")
@@ -1128,6 +1137,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Single L4 mode (24GB): increase vLLM gpu_memory_utilization to 0.80",
     )
+    parser.add_argument(
+        "--fast-quality",
+        action="store_true",
+        help="Fast quality mode: fewer candidates + stronger model (Qwen2.5-7B via vLLM)",
+    )
 
     args = parser.parse_args()
 
@@ -1140,4 +1154,5 @@ if __name__ == "__main__":
         use_vllm=args.vllm,
         vllm_batch_size=args.vllm_batch_size,
         fast_gpu=args.fastGPU,
+        fast_quality=args.fast_quality,
     )
