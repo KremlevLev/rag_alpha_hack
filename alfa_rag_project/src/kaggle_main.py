@@ -82,14 +82,12 @@ PIPELINE_VERSION: str = "v2-adaptive-len"
 
 
 # System prompt для русскоязычных моделей
-SYSTEM_PROMPT = """Ты — банковский AI-ассистент Альфа-Банка. Отвечай ТОЛЬКО на основе контекста.
+SYSTEM_PROMPT = """Ты — банковский AI-ассистент Альфа-Банка.
 
-ПРАВИЛА:
-1. Дай короткий фактический ответ на вопрос клиента.
-2. Если в начале контекста есть готовый ответ — используй его как главный ориентир.
-3. Если в контексте нет ответа — напиши ровно: "Нет ответа."
-4. НЕ выдумывай, НЕ повторяйся, НЕ копируй служебные маркеры.
-5. Не пиши "Вопрос:", "Контекст:", "Ответ:" — только сам ответ.
+Отвечай только на вопрос клиента. Используй контекст, но не копируй его дословно.
+Если ответа нет — напиши: "Нет ответа."
+
+Формат ответа: только сам ответ, без слов "Вопрос", "Контекст", "Ответ".
 """.strip()
 
 
@@ -150,6 +148,7 @@ _PROMPT_LEAK_RE = re.compile(
 )
 _QUESTION_CONTEXT_RE = re.compile(r"\bвопрос:\s*.*?\s*контекст:\s*", flags=re.IGNORECASE | re.UNICODE | re.DOTALL)
 _INSTRUCTION_LEAK_RE = re.compile(r"(?:---\s*)?ответь кратко.*?(?:контекста|вопроса)?\.?", flags=re.IGNORECASE | re.UNICODE)
+_BASED_ON_CONTEXT_RE = re.compile(r"\s*на основе контекста\.?", flags=re.IGNORECASE | re.UNICODE)
 _PASSWORD_RE = re.compile(r"PASSWORD{2,}", flags=re.IGNORECASE)
 _GARBAGE_PHRASES = (
     "контекст для ответа",
@@ -196,7 +195,7 @@ def is_garbage_answer(text: str) -> bool:
         return True
     if any(phrase in lowered for phrase in _GARBAGE_PHRASES):
         return True
-    if _INSTRUCTION_LEAK_RE.search(text) or _PASSWORD_RE.search(text):
+    if _INSTRUCTION_LEAK_RE.search(text) or _BASED_ON_CONTEXT_RE.search(text) or _PASSWORD_RE.search(text):
         return True
 
     # Слишком много повторений одного и того же слова
@@ -226,6 +225,7 @@ def clean_llm_answer(text: str) -> str:
     text = _PROMPT_LEAK_RE.sub("", text)
     text = _QUESTION_CONTEXT_RE.sub("", text)
     text = _INSTRUCTION_LEAK_RE.sub("", text)
+    text = _BASED_ON_CONTEXT_RE.sub("", text)
     text = _PASSWORD_RE.sub("", text)
     text = _REPEAT_TOKEN_RE.sub(r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
@@ -375,7 +375,7 @@ class KaggleGenerator:
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Вопрос: {query}\n\nКонтекст:\n{context}\n\nОтветь кратко на основе контекста."},
+            {"role": "user", "content": f"{query}\n\n{context}"},
         ]
 
         try:
