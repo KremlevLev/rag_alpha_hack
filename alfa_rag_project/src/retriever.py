@@ -49,6 +49,12 @@ _BROKEN_HTML_ENTITY_RE = re.compile(r"&[a-zA-Z]{2,8};?|&#\d{1,5};?", re.UNICODE)
 # Chunk ID в начале строки: [38644], [0], [123456]
 _CHUNK_ID_PREFIX_RE = re.compile(r"^\s*\[\d+\]\s*", re.UNICODE)
 
+# Служебный заголовок контекста, который модель копирует в submission
+_CONTEXT_HEADER_PREFIX_RE = re.compile(
+    r"^\s*Контекст\s+для\s+ответа\s+на\s+вопрос\s*:?\s*",
+    re.IGNORECASE | re.UNICODE,
+)
+
 # Неразрывные и управляющие пробелы: \xa0, \u200b, \t и подобные
 _WHITESPACE_VARIANTS_RE = re.compile(
     r"[\xa0\u00a0\u200b\u200c\u200d\u2060\ufeff\t]+",
@@ -206,6 +212,9 @@ def clean_chunk_text(
     
     # Шаг 1: chunk ID
     text = _remove_chunk_id_prefix(text)
+    
+    # Шаг 1.5: служебный заголовок контекста
+    text = _CONTEXT_HEADER_PREFIX_RE.sub("", text)
     
     # Шаг 2: HTML
     text = _strip_html(text)
@@ -501,8 +510,8 @@ class Retriever:
         context_parts = head + tail[::-1]
         
         # FIX-G5: НЕ нумеруем фрагменты — модель копирует маркеры в ответ
-        # Вместо этого используем чистый разделитель
-        return "Контекст для ответа на вопрос:\n\n" + "\n\n".join(context_parts)
+        # Вместо этого используем чистый разделитель без служебного заголовка
+        return "\n\n".join(context_parts)
 
 
 # ─────────────────────────────────────────────
