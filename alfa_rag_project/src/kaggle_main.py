@@ -78,7 +78,7 @@ import re
 # ─────────────────────────────────────────────
 # Pipeline version (менять при правке промпта/чанкеров/пост-процессинга)
 # ─────────────────────────────────────────────
-PIPELINE_VERSION: str = "v3-reference-rescue-cleanup"
+PIPELINE_VERSION: str = "v4-mixed-script-cleanup"
 
 
 # System prompt для русскоязычных моделей
@@ -206,21 +206,44 @@ _GARBAGE_PHRASES = (
 _GARBAGE_PHRASES_SET = frozenset(_GARBAGE_PHRASES)
 
 _REFERENCE_PREAMBLE_RE = re.compile(
-    r"^\s*(?:согласно\s+фрагмент[ауые]*\s*\d*[,:]?\s*"
+    r"^\s*(?:согласно\s+(?:предоставленным\s+)?фрагмент[а-яё]*\s*\d*[,:]?\s*"
     r"|в\s+фрагмент[еах]*\s*\d*\s*[:：]?\s*"
     r"|в\s+фрагмент[еах]*\s*\d*\s*(?:указано|сказано|говорится)[,:]?\s*)",
     flags=re.IGNORECASE | re.UNICODE,
 )
 
+_REFERENCE_ANSWER_LABEL_RE = re.compile(
+    r"\s*ответ\s*[:：]\s*",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_REFERENCE_CONTEXT_PHRASE_RE = re.compile(
+    r"\bв\s+предоставленных\s+фрагментах\s+",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_REFERENCE_CONTEXT_SENTENCE_RE = re.compile(
+    r"\s*(?:также,\s*)?в\s+фрагмент[еах]*\s*\d+\s+"
+    r"(?:указан[а-яё]*|сказано|говорится)[^.。!?]*",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_REFERENCE_FILLER_RE = re.compile(
+    r"\s*(?:таким образом|итак|следовательно),?\s*",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+
 _SUSPICIOUS_SCRIPT_RE = re.compile(
     r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\uac00-\ud7af"
-    r"\u3130-\u318f\u1100-\u11ff\u0e00-\u0e7f\u0900-\u097f\u0980-\u09ff]",
+    r"\u1100-\u11ff\u3040-\u30ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff"
+    r"\u0e00-\u0e7f\u0900-\u097f\u0980-\u09ff\ufffd]",
     flags=re.UNICODE,
 )
 
 _MIXED_LATIN_CYRILLIC_RE = re.compile(
-    r"(?<![\w-])[A-Za-z]{2,}[^A-Za-zА-Яа-яЁё\s.,;:!?()\"'\-]{0,3}[А-Яа-яЁё]{2,}"
-    r"|(?<![\w-])[А-Яа-яЁё]{2,}[^A-Za-zА-Яа-яЁё\s.,;:!?()\"'\-]{0,3}[A-Za-z]{2,}(?![\w-])",
+    r"(?<!\w)"
+    r"(?:"
+    r"[A-Za-z]+[_\-—:;,.()\"']{0,3}[А-Яа-яЁё]+"
+    r"|[А-Яа-яЁё]+[_\-—:;,.()\"']{0,3}[A-Za-z]+"
+    r")"
+    r"(?!\w)",
     flags=re.UNICODE,
 )
 
@@ -230,13 +253,23 @@ _ALLOWED_LATIN_TOKENS = frozenset({
     "android", "ios", "samsung", "pay", "googlepay", "applepay", "samsungpay",
     "swift", "sepa", "api", "url", "sms", "pin", "iban", "bic", "qr", "pos",
     "cvv", "3ds", "secure", "online", "bank", "id", "ip", "wi", "fi",
-    "cashback", "hold", "number",
+    "cashback", "hold", "number", "push",
 })
 
 _SUSPICIOUS_LATIN_TOKEN_RE = re.compile(
     r"(?<![\w-])[A-Za-z][A-Za-z0-9_-]{2,}(?![\w-])",
     flags=re.UNICODE,
 )
+
+
+def _has_disallowed_mixed_latin_cyrillic(text: str) -> bool:
+    """Return True when Latin/Cyrillic mixing is not an allowed banking term."""
+    for match in _MIXED_LATIN_CYRILLIC_RE.finditer(text):
+        latin_part = "".join(re.findall(r"[A-Za-z]+", match.group(0)))
+        if latin_part and latin_part.lower() in _ALLOWED_LATIN_TOKENS:
+            continue
+        return True
+    return False
 
 
 def strip_preamble(text: str) -> str:
@@ -280,7 +313,7 @@ def is_garbage_answer(text: str) -> bool:
         return True
     if _SUSPICIOUS_SCRIPT_RE.search(text):
         return True
-    if _MIXED_LATIN_CYRILLIC_RE.search(text):
+    if _has_disallowed_mixed_latin_cyrillic(text):
         return True
 
     # Маленькие модели иногда вставляют случайные латинские токены в русскую фразу.
@@ -342,10 +375,17 @@ def clean_reference_answer(text: str) -> str:
 
     text = clean_context_sentence(text)
     text = _REFERENCE_PREAMBLE_RE.sub("", text)
+    text = _REFERENCE_CONTEXT_PHRASE_RE.sub("", text)
+    text = _REFERENCE_CONTEXT_SENTENCE_RE.sub("", text)
+    text = _REFERENCE_FILLER_RE.sub(" ", text)
+    text = _REFERENCE_ANSWER_LABEL_RE.sub("", text)
     text = _CONTEXT_MARKER_RE.sub("", text)
     text = re.sub(r"\n\s*\*\s+", "\n* ", text)
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"\s+([,.;:?!])", r"\1", text)
+    text = re.sub(r"([.。!?])\s*([А-Яа-яЁё])", r"\1 \2", text)
+    text = re.sub(r"\s*[,;:]\.\s*", ". ", text)
+    text = re.sub(r"\.{2,}", ".", text)
     return text.strip()
 
 
