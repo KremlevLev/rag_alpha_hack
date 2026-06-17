@@ -149,6 +149,18 @@ _PROMPT_LEAK_RE = re.compile(
     flags=re.IGNORECASE | re.UNICODE | re.DOTALL,
 )
 _QUESTION_CONTEXT_RE = re.compile(r"\bвопрос:\s*.*?\s*контекст:\s*", flags=re.IGNORECASE | re.UNICODE | re.DOTALL)
+_INSTRUCTION_LEAK_RE = re.compile(r"(?:---\s*)?ответь кратко.*?(?:контекста|вопроса)?\.?", flags=re.IGNORECASE | re.UNICODE)
+_PASSWORD_RE = re.compile(r"PASSWORD{2,}", flags=re.IGNORECASE)
+_GARBAGE_PHRASES = (
+    "контекст для ответа",
+    "ответь кратко",
+    "согласно фрагменту",
+    "в предоставленных фрагментах",
+    "с muslimно",
+    "internet-бitter",
+    "т_mm — банковский",
+    "oeет ответа",
+)
 
 
 def strip_preamble(text: str) -> str:
@@ -182,6 +194,10 @@ def is_garbage_answer(text: str) -> bool:
         return True
     if "эталонный ответ" in lowered or "конец эталонного ответа" in lowered:
         return True
+    if any(phrase in lowered for phrase in _GARBAGE_PHRASES):
+        return True
+    if _INSTRUCTION_LEAK_RE.search(text) or _PASSWORD_RE.search(text):
+        return True
 
     # Слишком много повторений одного и того же слова
     words = re.findall(r"\w+", text, flags=re.UNICODE)
@@ -209,6 +225,8 @@ def clean_llm_answer(text: str) -> str:
     text = _REFERENCE_END_RE.sub("\n", text)
     text = _PROMPT_LEAK_RE.sub("", text)
     text = _QUESTION_CONTEXT_RE.sub("", text)
+    text = _INSTRUCTION_LEAK_RE.sub("", text)
+    text = _PASSWORD_RE.sub("", text)
     text = _REPEAT_TOKEN_RE.sub(r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
@@ -719,6 +737,7 @@ def run_pipeline(
     vllm_batch_size: int = 8,
     fast_gpu: bool = False,
     fast_quality: bool = False,
+    limit: int | None = None,
 ) -> None:
     """
     Запускает полный RAG pipeline для Kaggle.
@@ -732,6 +751,8 @@ def run_pipeline(
         use_vllm: Использовать vLLM вместо HF pipeline (×5-10 throughput на T4)
         vllm_batch_size: Размер батча для vLLM continuous batching
         fast_gpu: Режим для одной L4 (24GB) — больше памяти под vLLM
+        fast_quality: Быстрый режим с меньшим числом кандидатов и stronger model
+        limit: Generate only first N questions for debugging
     """
     # ── Fast quality mode ────────────────────────────────────
     tensor_parallel_size = 1
@@ -812,6 +833,9 @@ def run_pipeline(
     # ── Вопросы ───────────────────────────────────────────────
     logger.info("Loading questions from %s", QUESTIONS_CSV)
     questions_df = pd.read_csv(QUESTIONS_CSV)
+    if limit is not None and limit > 0:
+        questions_df = questions_df.head(limit)
+        logger.info("Limit enabled: generating only first %d questions", limit)
     total = len(questions_df)
 
     # ── Цикл генерации ────────────────────────────────────────
@@ -1159,7 +1183,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--fast-quality",
         action="store_true",
-        help="Fast quality mode: fewer candidates + stronger model (Qwen2.5-7B via vLLM)",
+        help="Fast quality mode: fewer candidates + stronger model (Qwen2.5-3B via vLLM)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Generate only first N questions for debugging (e.g. --limit 100)",
     )
 
     args = parser.parse_args()
@@ -1174,4 +1204,5 @@ if __name__ == "__main__":
         vllm_batch_size=args.vllm_batch_size,
         fast_gpu=args.fastGPU,
         fast_quality=args.fast_quality,
+        limit=args.limit,
     )
