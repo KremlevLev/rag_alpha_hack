@@ -10,7 +10,7 @@ import logging
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 import faiss
 import numpy as np
@@ -270,6 +270,10 @@ class Indexer:
                 "web_id": chunk.web_id,
                 "text": chunk.text,
                 "chunk_id": chunk.chunk_id,
+                "parent_id": chunk.parent_id,
+                "parent_text": chunk.parent_text,
+                "parent_start": chunk.parent_start,
+                "parent_end": chunk.parent_end,
             }
             for faiss_id, chunk in enumerate(unique_chunks)
         }
@@ -356,6 +360,38 @@ class Indexer:
         """
         # int ключи — явное приведение защищает от случайной подачи str
         return self.chunk_mapping.get(int(chunk_id))
+
+    def get_parent_by_child_id(self, child_id: int) -> Optional[dict[str, Any]]:
+        """Return parent metadata for a child chunk, or the child itself in legacy mode."""
+        chunk_data = self.get_chunk_by_id(child_id)
+        if chunk_data is None:
+            return None
+
+        parent_id = chunk_data.get("parent_id")
+        if parent_id is None:
+            return chunk_data
+
+        for faiss_id, data in self.chunk_mapping.items():
+            if data.get("parent_id") == parent_id and data.get("parent_text"):
+                return data
+
+        return chunk_data
+
+    def get_parent_texts(self, child_ids: Iterable[int]) -> dict[int, str]:
+        """Return unique parent texts for child chunk IDs."""
+        parent_texts: dict[int, str] = {}
+        for child_id in child_ids:
+            parent = self.get_parent_by_child_id(child_id)
+            if parent is None:
+                continue
+
+            raw_parent_id = parent.get("parent_id")
+            parent_id = int(raw_parent_id if raw_parent_id is not None else parent.get("chunk_id", child_id))
+            parent_text = parent.get("parent_text") or parent.get("text") or ""
+            if parent_text:
+                parent_texts[parent_id] = parent_text
+
+        return parent_texts
 
     def get_all_texts(self) -> list[str]:
         """

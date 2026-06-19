@@ -1,74 +1,28 @@
-# Python
+# Heavy submission CSVs (keep only sample_submission.csv)
+data/submission*.csv
+!data/sample_submission.csv
+
+# Generated index files
+data/faiss_index.bin
+data/chunk_mapping.json
+
+# Answer cache
+data/answer_cache.json
+
+# Checkpoints
+data/submission_checkpoint_*.csv
+
+# Fine-tuned models
+data/finetuned_models/
+
+# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 
-# Virtual environments
-venv/
-ENV/
-env/
-.venv/
+# Environment
+.env
 
 # IDE
 .idea/
 .vscode/
-*.swp
-*.swo
-*~
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# Data files (large, generated)
-data/faiss_index.bin
-data/chunk_mapping.json
-data/answer_cache.json
-data/finetuning_dataset.json
-data/submission_checkpoint_*.csv
-data/submission_test.csv
-data/analysis_first_50.csv
-data/submission (3).csv
-data/submission (4).csv
-
-# Model cache (Hugging Face)
-.cache/huggingface/
-.cache/torch/
-model_cache/
-
-# Logs
-*.log
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Environment variables
-.env
-.env.local
-
-# Misc
-.roorules
-*.lock
-*.pyc
-obsidian_client.py
-test_obsidian_client.py
-analyze_answers.py
-evaluate_metric.py

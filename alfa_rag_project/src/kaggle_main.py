@@ -38,9 +38,9 @@ from config import (
     TEMPERATURE,
     LLM_TIMEOUT,
 )
-from chunker import chunk_all_websites
 from generator import clean_context_sentence, extract_answer_from_context
 from indexer import build_and_save_index, load_index
+from parent_child import build_chunks
 from retriever import create_retriever
 
 # ─────────────────────────────────────────────
@@ -78,17 +78,18 @@ import re
 # ─────────────────────────────────────────────
 # Pipeline version (менять при правке промпта/чанкеров/пост-процессинга)
 # ─────────────────────────────────────────────
-PIPELINE_VERSION: str = "v5-submission22-cleanup"
+PIPELINE_VERSION: str = "v7-parent-child-rag"
 
 
 # System prompt для русскоязычных моделей
 SYSTEM_PROMPT = """Ты — банковский AI-ассистент Альфа-Банка.
 
 Отвечай только на вопрос клиента. Используй контекст, но не копируй его дословно.
-Если ответа нет — напиши: "Нет ответа."
+Если точного ответа нет, не пиши «Нет ответа» и не копируй служебные фрагменты:
+дай короткий полезный ответ по смыслу или вежливо попроси уточнить детали вопроса.
 
 Формат ответа: только сам ответ. Не возвращай служебные строки вида "Вопрос:", "Контекст:", "Ответ:", "Ответь кратко" или "на основе контекста".
-Не вставляй случайные английские слова, названия городов, политические термины, HTML-служебные токены или мусорные повторы.
+Не вставляй случайные английские слова, названия городов, политические термины, HTML-служебные токены, цифровые перечни без содержания или мусорные повторы.
 """.strip()
 
 
@@ -195,6 +196,28 @@ _QUESTION_CONTEXT_RE = re.compile(r"\bвопрос:\s*.*?\s*контекст:\s*
 _INSTRUCTION_LEAK_RE = re.compile(r"(?:---\s*)?ответь кратко.*?(?:контекста|вопроса)?\.?", flags=re.IGNORECASE | re.UNICODE)
 _BASED_ON_CONTEXT_RE = re.compile(r"\s*на основе контекста\.?", flags=re.IGNORECASE | re.UNICODE)
 _PASSWORD_RE = re.compile(r"(?:PASSWORD){2,}", flags=re.IGNORECASE)
+_NO_ANSWER_ONLY_RE = re.compile(
+    r"^\s*Нет\s+ответа\.?\s*(?:[-–—]+\s*)?$",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_NO_ANSWER_PHRASE_RE = re.compile(
+    r"\bнет\s+ответа\b",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_NO_DIRECT_ANSWER_RE = re.compile(
+    r"^\s*нет\s+прямого\s+ответа\s+на\s+вопрос\b",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_EMPTY_NUMERIC_ANSWER_RE = re.compile(
+    r"^\s*(?:\d{1,3}\s*[,.)\-]\s*){2,}$"
+    r"|^\s*(?:\d{1,3}\s*){3,}$"
+    r"|^\s*(?:\d{1,3}\s*[./]\s*){7,}$",
+    flags=re.UNICODE,
+)
+_QUESTION_ONLY_CHAR_RE = re.compile(
+    r"^[А-Яа-яЁёA-Za-z0-9\s,.;:!?'\u2019\"«»()\\-]+$",
+    flags=re.UNICODE,
+)
 _GARBAGE_PHRASES = (
     "контекст для ответа",
     "ответь кратко",
@@ -215,11 +238,13 @@ _GARBAGE_PHRASES = (
     "Raven reality",
     "Cre1READ1 reality",
     "totalitarian",
-   "impонтекст",
-   "где мои деньги",
-   "sat.",
-   "sat ",
-   "sat,",
+    "impонтекст",
+    "где мои деньги",
+    "предоставьте вопрос",
+    "без вопроса я не могу",
+    "sat.",
+    "sat ",
+    "sat,",
 )
 
 _GARBAGE_PHRASES_SET = frozenset(_GARBAGE_PHRASES)
@@ -291,6 +316,38 @@ def _has_disallowed_mixed_latin_cyrillic(text: str) -> bool:
     return False
 
 
+_STOP_WORDS = frozenset({
+    "что", "как", "где", "когда", "почему", "зачем", "какой", "какая",
+    "какие", "можно", "нужно", "надо", "если", "я", "вы", "мы",
+    "не", "ли", "по", "в", "на", "с", "со", "для", "от", "до", "и", "или",
+})
+
+
+def _is_question_only_answer(text: str) -> bool:
+    """Detect answers that only repeat/ask the question without content."""
+    stripped = text.strip()
+    if stripped.count("?") < 2 or len(stripped) > 220:
+        return False
+    if not _QUESTION_ONLY_CHAR_RE.fullmatch(stripped):
+        return False
+
+    query_words = {
+        word.strip(".,!?;:\"'()[]")
+        for word in stripped.lower().split()
+        if len(word) > 2 and word not in _STOP_WORDS
+    }
+    answer_words = {
+        word.strip(".,!?;:\"'()[]")
+        for word in re.sub(r"[.!?]", " ", stripped.lower()).split()
+        if len(word) > 2 and word not in _STOP_WORDS
+    }
+    if not query_words or not answer_words:
+        return False
+
+    overlap = query_words & answer_words
+    return len(overlap) >= max(2, len(query_words) * 0.75)
+
+
 def strip_preamble(text: str) -> str:
     """Убирает мета-вводные клише, разбавляющие ответ."""
     prev = None
@@ -320,6 +377,10 @@ def is_garbage_answer(text: str) -> bool:
         return True
     if _PROMPT_LABEL_LINE_RE.search(text) or _NO_ANSWER_CONTEXT_RE.search(text):
         return True
+    if _NO_ANSWER_ONLY_RE.search(text) or _NO_DIRECT_ANSWER_RE.search(text):
+        return True
+    if _NO_ANSWER_PHRASE_RE.search(text):
+        return True
     if "ты — банковский ai" in lowered or "контекст для ответа" in lowered:
         return True
     if "эталонный ответ" in lowered or "конец эталонного ответа" in lowered:
@@ -331,6 +392,8 @@ def is_garbage_answer(text: str) -> bool:
     if _REPEAT_BLOCK_RE.search(text) or _REPEAT_SHORT_TOKEN_RE.search(text) or _REPEAT_PUNCTUATION_RE.search(text):
         return True
     if _DUPLICATED_QUESTION_RE.search(text) or _INCOMPLETE_ANSWER_RE.search(text):
+        return True
+    if _EMPTY_NUMERIC_ANSWER_RE.search(text) or _is_question_only_answer(text):
         return True
     if _SUSPICIOUS_SCRIPT_RE.search(text):
         return True
@@ -383,6 +446,7 @@ def clean_llm_answer(text: str) -> str:
     text = _INSTRUCTION_LEAK_RE.sub("", text)
     text = _BASED_ON_CONTEXT_RE.sub("", text)
     text = _PASSWORD_RE.sub("", text)
+    text = _EMPTY_NUMERIC_ANSWER_RE.sub("", text)
     text = _REPEAT_BLOCK_RE.sub(r"\1", text)
     text = _REPEAT_TOKEN_RE.sub(r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
@@ -934,6 +998,7 @@ def run_pipeline(
     fast_gpu: bool = False,
     fast_quality: bool = False,
     limit: int | None = None,
+    use_parent_child: bool = True,
 ) -> None:
     """
     Запускает полный RAG pipeline для Kaggle.
@@ -949,6 +1014,7 @@ def run_pipeline(
         fast_gpu: Режим для одной L4 (24GB) — больше памяти под vLLM
         fast_quality: Быстрый режим с меньшим числом кандидатов и stronger model
         limit: Generate only first N questions for debugging
+        use_parent_child: Индексировать child chunks и расширять hits до parent context
     """
     # ── Fast quality mode ────────────────────────────────────
     tensor_parallel_size = 1
@@ -971,7 +1037,7 @@ def run_pipeline(
             (row["web_id"], row["text"])
             for _, row in websites_df.iterrows()
         ]
-        chunks = chunk_all_websites(websites_data)
+        chunks = build_chunks(websites_data, use_parent_child=use_parent_child)
         logger.info("Created %d chunks", len(chunks))
         indexer = build_and_save_index(chunks)
     else:
@@ -1403,6 +1469,11 @@ if __name__ == "__main__":
         default=None,
         help="Generate only first N questions for debugging (e.g. --limit 100)",
     )
+    parser.add_argument(
+        "--legacy-chunking",
+        action="store_true",
+        help="Use legacy single-level chunks instead of parent-child retrieval",
+    )
 
     args = parser.parse_args()
 
@@ -1417,4 +1488,5 @@ if __name__ == "__main__":
         fast_gpu=args.fastGPU,
         fast_quality=args.fast_quality,
         limit=args.limit,
+        use_parent_child=not args.legacy_chunking,
     )

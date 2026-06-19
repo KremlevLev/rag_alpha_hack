@@ -28,13 +28,20 @@ LLM_BASE_URL: Final[str] = "http://localhost:11434/v1"
 LLM_MODEL: Final[str] = "qwen2.5:7b"  # Default model, can be changed
 
 # Chunking parameters - optimized for context density
-CHUNK_SIZE: Final[int] = 500  # Target chunk size in characters (3-5 sentences)
-CHUNK_OVERLAP: Final[int] = 120  # Overlap between chunks in characters
+CHUNK_SIZE: Final[int] = 500  # Target child chunk size in characters (3-5 sentences)
+CHUNK_OVERLAP: Final[int] = 120  # Overlap between child chunks in characters
+
+# Parent-child retrieval parameters
+# Parent chunks are used as LLM context; child chunks are indexed for precise hits.
+PARENT_CHUNK_SIZE: Final[int] = 1100  # Enough context to answer without flooding the model
+PARENT_CHUNK_OVERLAP: Final[int] = 220  # Sentence-aware overlap between parent chunks
+PARENT_CHILD_ENABLED: Final[bool] = True  # Default production mode
 
 # Retrieval parameters - optimized for quality
-TOP_K_RETRIEVAL: Final[int] = 40  # Number of candidates from FAISS
-TOP_K_BM25: Final[int] = 15  # Number of candidates from BM25
-TOP_K_RERANK: Final[int] = 15  # Number of final results after reranking
+TOP_K_RETRIEVAL: Final[int] = 80  # Number of child candidates from FAISS
+TOP_K_BM25: Final[int] = 50  # Number of child candidates from BM25
+TOP_K_RERANK: Final[int] = 15  # Number of final reranked parent chunks
+TOP_K_CONTEXT: Final[int] = 8  # Number of parent chunks passed to LLM to avoid context flooding
 
 # Reranker batch size for memory efficiency (prevents CUDA OOM)
 RERANKER_BATCH_SIZE: Final[int] = 4  # 4 — агрессивно мало для 2xT4 (было 15 — OOM)

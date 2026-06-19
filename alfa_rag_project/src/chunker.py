@@ -309,9 +309,14 @@ from config import CHUNK_SIZE, CHUNK_OVERLAP
 @dataclass
 class Chunk:
     """Represents a text chunk with metadata."""
+
     chunk_id: int
     web_id: int
     text: str
+    parent_id: int | None = None
+    parent_text: str | None = None
+    parent_start: int | None = None
+    parent_end: int | None = None
 
 
 def split_into_sentences(text: str) -> List[str]:

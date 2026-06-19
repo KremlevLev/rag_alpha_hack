@@ -14,7 +14,15 @@ import torch
 from sentence_transformers import CrossEncoder
 from rank_bm25 import BM25Okapi
 
-from config import TOP_K_RETRIEVAL, TOP_K_RERANK, RERANKER_MODEL, TOP_K_BM25, RERANKER_BATCH_SIZE, MIN_RERANK_SCORE
+from config import (
+    TOP_K_RETRIEVAL,
+    TOP_K_RERANK,
+    RERANKER_MODEL,
+    TOP_K_BM25,
+    RERANKER_BATCH_SIZE,
+    MIN_RERANK_SCORE,
+    TOP_K_CONTEXT,
+)
 from indexer import Indexer, normalize_for_embedding
 
 logger = logging.getLogger(__name__)
@@ -259,6 +267,30 @@ def _tokenize_for_bm25(text: str) -> list[str]:
     # Simple tokenization: split on whitespace and remove punctuation
     text = re.sub(r"[^\w\sа-яёa-z]", " ", text.lower(), flags=re.UNICODE)
     return [t for t in text.split() if t and len(t) > 1]
+def _expand_child_candidates_to_parents(
+    indexer: Indexer,
+    child_candidates: List[Tuple[int, str]],
+) -> List[Tuple[int, str]]:
+    """
+    Expand narrow child hits to their parent chunks.
+
+    Parent-child retrieval indexes small child chunks but scores larger parent
+    chunks with the reranker. This keeps semantic/lexical hits precise while
+    giving the LLM enough surrounding context to answer.
+    """
+    parent_texts: dict[int, str] = {}
+
+    for child_id, child_text in child_candidates:
+        parent_data = indexer.get_parent_by_child_id(child_id)
+        if parent_data is None:
+            continue
+
+        raw_parent_id = parent_data.get("parent_id")
+        parent_id = int(raw_parent_id if raw_parent_id is not None else parent_data.get("chunk_id", child_id))
+        parent_text = parent_data.get("parent_text") or child_text
+        parent_texts.setdefault(parent_id, str(parent_text))
+
+    return list(parent_texts.items())
 
 
 # ─────────────────────────────────────────────
@@ -413,11 +445,20 @@ class Retriever:
         if not merged_candidates:
             return []
 
-        # ── Stage 4: Cross-encoder reranking (batched, на ОЧИЩЕННОМ тексте) ──
+        # ── Stage 4: Parent-child expansion ───────────────────────────────
+        # Child hits are precise; parent chunks are scored and shown to LLM.
+        parent_candidates = _expand_child_candidates_to_parents(
+            self.indexer,
+            merged_candidates,
+        )
+        if not parent_candidates:
+            return []
+
+        # ── Stage 5: Cross-encoder reranking (batched, на ОЧИЩЕННОМ тексте) ──
         # FIX-R2: reranker скорит чистый текст, не сырой HTML
         all_pairs = [
             (query, clean_chunk_text(text, self.cleaner_config) or text)
-            for _, text in merged_candidates
+            for _, text in parent_candidates
         ]
         rerank_scores = []
         
@@ -431,13 +472,13 @@ class Retriever:
                 )
         
         top_indices = np.argsort(rerank_scores)[::-1][:TOP_K_RERANK]
-        
+
         results = []
         for idx in top_indices:
-            chunk_id, text = merged_candidates[idx]
+            parent_id, text = parent_candidates[idx]
             score = float(rerank_scores[idx])
-            results.append((chunk_id, text, score))
-        
+            results.append((parent_id, text, score))
+
         return results
     
     def get_context(
@@ -469,10 +510,13 @@ class Retriever:
             Clean context string ready for LLM, or "" if nothing retrieved.
         """
         results = self.retrieve(query)
-        
+
         if not results:
             return ""
-        
+
+        # Ограничиваем контекст, чтобы parent-child не забил окно модели.
+        results = results[:TOP_K_CONTEXT]
+
         # 5.3: если лучший чанк ниже порога релевантности — вопрос нерелевантен контексту
         # Возвращаем пустую строку, чтобы генератор использовал fallback
         best_score = results[0][2]
@@ -483,14 +527,14 @@ class Retriever:
                 MIN_RERANK_SCORE,
             )
             return ""
-        
+
         config = cleaner_config or self.cleaner_config
-        
+
         context_parts = []
-        
+
         for chunk_id, raw_text, score in results:
             cleaned = clean_chunk_text(raw_text, config)
-            
+
             if not cleaned:
                 logger.debug(
                     "Chunk %d dropped after cleaning (score=%.3f)",
@@ -498,9 +542,9 @@ class Retriever:
                     score,
                 )
                 continue
-            
+
             context_parts.append(cleaned)
-        
+
         # FIX-G4: "Lost in the Middle" fix — зигзаг (топовые чанки по краям)
         # results уже отсортированы по убыванию релевантности.
         # Чётные (0,2,4...) → head (начало), нечётные (1,3,5...) → tail (конец).
@@ -508,7 +552,7 @@ class Retriever:
         for i, part in enumerate(context_parts):
             (head if i % 2 == 0 else tail).append(part)
         context_parts = head + tail[::-1]
-        
+
         # FIX-G5: НЕ нумеруем фрагменты — модель копирует маркеры в ответ
         # Вместо этого используем чистый разделитель без служебного заголовка
         return "\n\n".join(context_parts)

@@ -49,14 +49,15 @@ alfa_rag_project/
 │   ├── faiss_index.bin           # Generated FAISS index
 │   └── chunk_mapping.json        # Generated chunk metadata
 └── src/
-    ├── config.py                 # Centralized configuration
-    ├── chunker.py                # Sentence-aware chunking
-    ├── indexer.py                # FAISS index + metadata
-    ├── retriever.py              # Hybrid retrieval + reranking
-    ├── generator.py              # LLM generation + fallback extraction
-    ├── kaggle_main.py            # Main pipeline orchestrator
-    ├── __init__.py
-    └── __main__.py
+   ├── config.py                 # Centralized configuration
+   ├── chunker.py                # Sentence-aware chunking
+   ├── parent_child.py           # Parent-child chunking for precision retrieval
+   ├── indexer.py                # FAISS index + metadata
+   ├── retriever.py              # Hybrid retrieval + reranking
+   ├── generator.py              # LLM generation + fallback extraction
+   ├── kaggle_main.py            # Main pipeline orchestrator
+   ├── __init__.py
+   └── __main__.py
 ```
 
 ## Installation
@@ -109,6 +110,7 @@ python kaggle_main.py --build-index --model vikhr-1b --vllm --vllm-batch-size 8 
 | `--no-validate` | Disable answer validation |
 | `--min-overlap N` | Minimum word overlap for validation |
 | `--cache-path PATH` | Custom answer cache path |
+| `--legacy-chunking` | Use legacy single-level chunks instead of parent-child retrieval |
 
 ## Available Models
 
@@ -144,23 +146,30 @@ data/submission.csv
 
 ### Retrieval
 
-1. **FAISS Semantic Search**
-   - Model: `BAAI/bge-m3`
-   - Embedding dimension: 1024
-   - Similarity: Inner Product with normalized vectors
+1. **Parent-Child Chunking**
+  - Large parent chunks (1100 chars) are split into smaller child chunks (500 chars)
+  - Child chunks are indexed for precise semantic/lexical matching
+  - Retrieved child hits are expanded back to their parent chunks before reranking
+  - Keeps embedding precision high while giving the LLM enough surrounding context
 
-2. **BM25 Lexical Search**
-   - Russian tokenization with morphology-aware preprocessing
-   - Complements semantic search with exact term matching
+2. **FAISS Semantic Search**
+  - Model: `BAAI/bge-m3` (1024-dimensional embeddings)
+  - Inner Product similarity with normalized vectors
+  - Retrieves top-80 child candidates
 
-3. **Candidate Fusion**
-   - Reciprocal Rank Fusion merges FAISS and BM25 results
-   - Deduplicates by chunk ID
+3. **BM25 Lexical Search**
+  - Russian tokenization with morphology-aware preprocessing
+  - Complements semantic search with exact term matching
+  - Retrieves top-50 child candidates
 
-4. **Cross-Encoder Reranking**
-   - Model: `BAAI/bge-reranker-v2-m3`
-   - Batched for memory efficiency
-   - Top-k reranked chunks passed to generator
+4. **Candidate Fusion**
+  - Reciprocal Rank Fusion merges FAISS and BM25 results
+  - Child hits expanded back to parent chunks
+
+5. **Cross-Encoder Reranking**
+  - Model: `BAAI/bge-reranker-v2-m3`
+  - Batched for memory efficiency (`RERANKER_BATCH_SIZE=4`)
+  - Reranks parent chunks, keeps top-15, passes top-8 to generator
 
 ### Generation
 
@@ -182,11 +191,13 @@ data/submission.csv
 
 ## Key Features
 
+- **Parent-child retrieval** — index small child chunks for precision, expand to parent chunks for LLM context
 - **Sentence-aware chunking** with `razdel.sentenize`
 - **HTML cleaning** before chunking and retrieval
-- **Hybrid retrieval** with FAISS + BM25
-- **Cross-encoder reranking** for precision
+- **Hybrid retrieval** with FAISS + BM25 + Reciprocal Rank Fusion
+- **Cross-encoder reranking** with BAAI/bge-reranker-v2-m3
 - **Reference answer injection** from `sample_submission.csv`
+- **Context size guard** — limits to top-8 parent chunks to prevent flooding the model window
 - **Adaptive truncation** for BERTScore-Recall-L
 - **Garbage detection** for prompt leakage and malformed outputs
 - **Persistent answer cache** in JSON
@@ -199,14 +210,18 @@ Key parameters in `src/config.py`:
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `CHUNK_SIZE` | 500 | Target chunk size in characters |
-| `CHUNK_OVERLAP` | 120 | Overlap between chunks |
-| `TOP_K_RETRIEVAL` | 40 | FAISS candidates |
-| `TOP_K_BM25` | 15 | BM25 candidates |
-| `TOP_K_RERANK` | 15 | Final reranked results |
+| `CHUNK_SIZE` | 500 | Child chunk size in characters |
+| `CHUNK_OVERLAP` | 120 | Overlap between child chunks |
+| `PARENT_CHUNK_SIZE` | 1100 | Parent chunk size (LLM context unit) |
+| `PARENT_CHUNK_OVERLAP` | 220 | Overlap between parent chunks |
+| `PARENT_CHILD_ENABLED` | `True` | Default production mode |
+| `TOP_K_RETRIEVAL` | 80 | FAISS child candidates |
+| `TOP_K_BM25` | 50 | BM25 child candidates |
+| `TOP_K_RERANK` | 15 | Reranked parent chunks |
+| `TOP_K_CONTEXT` | 8 | Parent chunks passed to LLM |
 | `RERANKER_BATCH_SIZE` | 4 | Memory-safe batch size for T4 |
 | `MAX_SENTENCES` | 5 | Maximum sentences in answer |
-| `MAX_RESPONSE_CHARS` | 450 | Safety limit for BERTScore-Recall-L |
+| `MAX_RESPONSE_CHARS` | 550 | Safety limit for BERTScore-Recall-L |
 
 ## Kaggle Deployment
 
@@ -252,6 +267,12 @@ Centralized configuration with paths, model names, and hyperparameters.
 - `Chunker` class with configurable parameters
 - `clean_text()` removes HTML, service phrases, and whitespace noise
 - `chunk_text()` performs sentence-aware splitting with overlap
+
+### `parent_child.py`
+- `build_parent_child_chunks()` creates child chunks with parent metadata
+- `build_chunks()` entry point with `use_parent_child` toggle
+- Child chunks indexed for retrieval; parent chunks used for LLM context
+- Configurable via `ParentChildConfig`
 
 ### `indexer.py`
 - `build_and_save_index()` creates FAISS index with BGE-M3 embeddings
