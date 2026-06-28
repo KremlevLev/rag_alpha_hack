@@ -1,99 +1,25 @@
 # Alfa-Bank RAG Hackathon Pipeline
 
-Pure Python RAG system built for the Alfa-Bank MIPT hackathon. No LangChain, no LlamaIndex — just explicit retrieval, reranking, generation, and post-processing.
+Pure Python RAG system built for the Alfa-Bank MIPT hackathon.  
+**Final pipeline score:** BERTScore-Recall-L optimized.
 
-## Current Entry Point
+## Quick Start (Kaggle 2xT4)
 
-**`src/kaggle_main.py`** is the only active pipeline entry point.
-
-All other legacy scripts have been removed from the repository.
-
-## What This Project Does
-
-The pipeline answers Alfa-Bank FAQ questions using a RAG architecture:
-
-1. **Chunk** Russian banking website text into sentence-aware chunks
-2. **Index** chunks with BGE-M3 embeddings in FAISS
-3. **Retrieve** candidates using hybrid search:
-   - FAISS semantic search
-   - BM25 lexical search
-   - Cross-encoder reranking with `BAAI/bge-reranker-v2-m3`
-4. **Generate** answers with a local LLM
-5. **Post-process** answers to remove noise and enforce BERTScore-Recall-L length constraints
-
-## Metric: BERTScore-Recall-L
-
-The hackathon metric is **BERTScore-Recall-L**, which includes a relative length penalty:
-
-- **No penalty** if answer length `L <= 1.5 * reference_length`
-- **Linear penalty** from `1.5x` to `3x` reference length
-- **Zero score** if `L >= 3x` reference length
-
-Reference answers in `data/sample_submission.csv` are typically **250–450+ characters**, often 3–6 sentences or bullet lists.
-
-**Important:** Hard truncation to 150 characters destroys recall on complex list answers. The current pipeline uses adaptive truncation with `MAX_RESPONSE_CHARS=450` and `MAX_SENTENCES=5`.
-
-## Project Structure
-
-```text
-alfa_rag_project/
-├── README.md
-├── requirements.txt
-├── evaluate_metric.py
-├── hypotheses.md
-├── data/
-│   ├── websites.csv              # Input: web_id, text
-│   ├── questions.csv             # Input: q_id, query
-│   ├── sample_submission.csv     # Reference answers / allowed leak
-│   ├── submission.csv            # Output predictions
-│   ├── faiss_index.bin           # Generated FAISS index
-│   └── chunk_mapping.json        # Generated chunk metadata
-└── src/
-   ├── config.py                 # Centralized configuration
-   ├── chunker.py                # Sentence-aware chunking
-   ├── parent_child.py           # Parent-child chunking for precision retrieval
-   ├── indexer.py                # FAISS index + metadata
-   ├── retriever.py              # Hybrid retrieval + reranking
-   ├── generator.py              # LLM generation + fallback extraction
-   ├── kaggle_main.py            # Main pipeline orchestrator
-   ├── __init__.py
-   └── __main__.py
+```python
+!git clone https://github.com/KremlevLev/RAG-Pipeline-for-High-Load-Banking-Data.git /kaggle/working/rag_alpha_hack
+!pip install -r /kaggle/working/rag_alpha_hack/requirements.txt
 ```
 
-## Installation
-
 ```bash
-pip install -r requirements.txt
+cd /kaggle/working/rag_alpha_hack && python src/kaggle_main.py --build-index --fast-quality --no-validate
 ```
 
-## Quick Start
+Output: `data/submission.csv` (~7000 answers, ~2–4 hours).
 
-### Build index and generate submission
-
-```bash
-cd alfa_rag_project/src
-python kaggle_main.py --build-index --fast-quality --no-validate
-```
-
-### Generate only first 100 questions for debugging
+## Debug (first 100 questions)
 
 ```bash
-cd alfa_rag_project/src
-python kaggle_main.py --limit 100 --fast-quality --no-validate
-```
-
-### Use Vikhr-1B instead
-
-```bash
-cd alfa_rag_project/src
-python kaggle_main.py --build-index --model vikhr-1b --fast-quality --no-validate
-```
-
-### Use vLLM explicitly
-
-```bash
-cd alfa_rag_project/src
-python kaggle_main.py --build-index --model vikhr-1b --vllm --vllm-batch-size 8 --no-validate
+python src/kaggle_main.py --build-index --fast-quality --no-validate --limit 100
 ```
 
 ## CLI Options
@@ -101,255 +27,139 @@ python kaggle_main.py --build-index --model vikhr-1b --vllm --vllm-batch-size 8 
 | Flag | Description |
 |------|-------------|
 | `--build-index` | Rebuild FAISS index from scratch |
-| `--model MODEL` | LLM model key from `KAGGLE_MODELS` |
-| `--vllm` | Use vLLM instead of Hugging Face pipeline |
-| `--vllm-batch-size N` | Batch size for vLLM continuous batching |
-| `--fastGPU` | Single L4 mode with higher GPU memory utilization |
-| `--fast-quality` | Fast quality mode: fewer candidates + stronger model |
-| `--limit N` | Generate only first N questions for debugging |
-| `--no-validate` | Disable answer validation |
-| `--min-overlap N` | Minimum word overlap for validation |
-| `--cache-path PATH` | Custom answer cache path |
-| `--legacy-chunking` | Use legacy single-level chunks instead of parent-child retrieval |
-
-## Available Models
-
-In `src/config.py`:
-
-| Key | Model | Notes |
-|-----|-------|-------|
-| `vikhr-1b-finetuned` | `lirex111/vikhrllama1B_AlfaBank` | Fine-tuned Vikhr-1B for Alfa-Bank |
-| `vikhr-1b` | `Vikhrmodels/Vikhr-Llama-3.2-1B-instruct` | Fast, stable, fits on T4 |
-| `qwen2.5-3b` | `Qwen/Qwen2.5-3B-Instruct` | Stronger than Vikhr, should fit on 2xT4 |
-| `qwen2.5-7b` | `Qwen/Qwen2.5-7B-Instruct` | Higher quality, may OOM on 2xT4 |
-| `qwen2-7b` | `Qwen/Qwen2-7B-Instruct` | Alternative Qwen model |
-| `mistral-7b` | `mistralai/Mistral-7B-Instruct-v0.3` | General-purpose 7B |
-| `llama3-8b` | `Meta-Llama-3-8B-Instruct` | Larger model, memory-heavy |
+| `--model MODEL` | LLM model key (default: qwen2.5-3b with `--fast-quality`) |
+| `--fast-quality` | **Production mode:** vLLM + Qwen2.5-3B + reduced candidate pools |
+| `--legacy-chunking` | Disable parent-child retrieval (fallback to single-level chunks) |
+| `--limit N` | Generate only first N questions |
+| `--no-validate` | Disable answer validation (recommended for speed) |
+| `--vllm` | Explicit vLLM mode (auto-enabled by `--fast-quality`) |
+| `--vllm-batch-size N` | vLLM batch size (default: 16 with `--fast-quality`) |
 
 ## Architecture
+
+### GPU Layout (2xT4, `--fast-quality`)
+
+| GPU | Process |
+|-----|---------|
+| **cuda:0** | vLLM (Qwen2.5-3B, `tensor_parallel_size=1`) |
+| **cuda:1** | Cross-Encoder Reranker (BAAI/bge-reranker-v2-m3) |
+
+Qwen2.5-3B fits in ~6 GiB on one T4 (14.56 GiB). The second GPU is reserved for the reranker — avoids CPU fallback which would make generation >6.5s/question and exceed Kaggle's 12-hour session.
 
 ### Pipeline Flow
 
 ```text
-questions.csv
-    ↓
-Retriever
-    ↓
-FAISS + BM25 + Cross-Encoder Reranker
-    ↓
-Generator
-    ↓
-Post-processing
-    ↓
-data/submission.csv
+websites.csv → Parent-Child Chunker → FAISS + BM25 → RRF Fusion
+    → Parent Expansion → Cross-Encoder Rerank → LLM → Post-process → submission.csv
 ```
 
-### Retrieval
+1. **Parent-Child Chunking** — large parent chunks (1100 chars) split into smaller child chunks (500 chars). Children are indexed for precise matching; parents are used for LLM context.
+2. **FAISS Semantic Search** — `BAAI/bge-m3` embeddings, top-30 child candidates (fast-quality mode).
+3. **BM25 Lexical Search** — exact term matching, top-15 child candidates.
+4. **RRF Fusion** — Reciprocal Rank Fusion merges results, expands child hits back to parent chunks.
+5. **Cross-Encoder Reranking** — `BAAI/bge-reranker-v2-m3` on cuda:1, top-8 parent chunks to LLM.
+6. **LLM Generation** — Qwen2.5-3B via vLLM (continuous batching).
+7. **Post-processing** — garbage detection, reference rescue, adaptive truncation.
 
-1. **Parent-Child Chunking**
-  - Large parent chunks (1100 chars) are split into smaller child chunks (500 chars)
-  - Child chunks are indexed for precise semantic/lexical matching
-  - Retrieved child hits are expanded back to their parent chunks before reranking
-  - Keeps embedding precision high while giving the LLM enough surrounding context
+### Speed Optimizations (fast-quality mode)
 
-2. **FAISS Semantic Search**
-  - Model: `BAAI/bge-m3` (1024-dimensional embeddings)
-  - Inner Product similarity with normalized vectors
-  - Retrieves top-80 child candidates
+| Parameter | Normal | fast-quality |
+|-----------|--------|-------------|
+| `TOP_K_RETRIEVAL` | 40 | **30** |
+| `TOP_K_BM25` | 20 | **15** |
+| `TOP_K_RERANK` | 10 | **8** |
+| `tensor_parallel_size` | 1 | **1** (leaves cuda:1 for reranker) |
+| `gpu_memory_utilization` | 0.55 | **0.80** |
+| Speed guard | Disabled | Disabled |
 
-3. **BM25 Lexical Search**
-  - Russian tokenization with morphology-aware preprocessing
-  - Complements semantic search with exact term matching
-  - Retrieves top-50 child candidates
+## Project Structure
 
-4. **Candidate Fusion**
-  - Reciprocal Rank Fusion merges FAISS and BM25 results
-  - Child hits expanded back to parent chunks
-
-5. **Cross-Encoder Reranking**
-  - Model: `BAAI/bge-reranker-v2-m3`
-  - Batched for memory efficiency (`RERANKER_BATCH_SIZE=4`)
-  - Reranks parent chunks, keeps top-15, passes top-8 to generator
-
-### Generation
-
-1. **Context Retrieval**
-   - Top-k cleaned chunks
-   - Zigzag ordering to reduce Lost-in-the-Middle effect
-   - Reference answer injected as dominant hint
-
-2. **LLM Generation**
-   - Vikhr-1B or Qwen2.5-3B on Kaggle
-   - vLLM supported for throughput
-
-3. **Post-processing**
-   - Remove prompt leakage
-   - Remove context markers
-   - Remove duplicate phrases
-   - Detect garbage answers
-   - Fallback to extraction if generation fails
+```text
+├── README.md
+├── requirements.txt
+├── docker-compose.yml          # Qdrant + Phoenix (enterprise)
+├── .env.example                # API keys template
+├── src/
+│   ├── kaggle_main.py          # **Main pipeline entry point**
+│   ├── config.py               # All hyperparameters
+│   ├── chunker.py              # Sentence-aware chunking
+│   ├── parent_child.py         # Parent-child chunking (default)
+│   ├── indexer.py              # FAISS index + BGE-M3 embeddings
+│   ├── retriever.py            # Hybrid search + BM25 + reranker
+│   ├── generator.py            # LLM generation + fallback extraction
+│   ├── loader.py               # Enterprise: async Unstructured ETL
+│   ├── reranker.py             # Enterprise: Cohere Rerank v3 client
+│   ├── embeddings/             # Enterprise: Voyage/Cohere/BGE embedders
+│   ├── storage/                # Enterprise: Qdrant hybrid store
+│   ├── orchestrator/           # Enterprise: LangGraph Self-RAG
+│   ├── generation/             # Enterprise: Claude/OpenRouter clients
+│   └── observability/          # Enterprise: Phoenix/LangSmith tracing
+└── tests/
+    ├── test_kaggle_cleanup.py  # Garbage detection tests
+    ├── test_parent_child.py    # Parent-child retrieval tests
+    ├── test_loader.py          # ETL loader tests
+    ├── test_embeddings.py      # Embedder tests
+    ├── test_reranker.py        # Reranker tests
+    ├── test_orchestrator.py    # LangGraph tests
+    ├── test_generation.py      # LLM client tests
+    └── test_observability.py   # Tracing tests
+```
 
 ## Key Features
 
-- **Parent-child retrieval** — index small child chunks for precision, expand to parent chunks for LLM context
-- **Sentence-aware chunking** with `razdel.sentenize`
-- **HTML cleaning** before chunking and retrieval
-- **Hybrid retrieval** with FAISS + BM25 + Reciprocal Rank Fusion
-- **Cross-encoder reranking** with BAAI/bge-reranker-v2-m3
-- **Reference answer injection** from `sample_submission.csv`
-- **Context size guard** — limits to top-8 parent chunks to prevent flooding the model window
-- **Adaptive truncation** for BERTScore-Recall-L
-- **Garbage detection** for prompt leakage and malformed outputs
-- **Persistent answer cache** in JSON
-- **Checkpoint resume** every 2000 answers
-- **Speed guard** to avoid exceeding Kaggle 12-hour sessions
+- **Parent-child retrieval** — index small chunks for precision, expand to parents for LLM context
+- **GPU-aware scheduling** — vLLM on cuda:0, reranker on cuda:1 (no contention)
+- **Hybrid search** — FAISS + BM25 + Reciprocal Rank Fusion
+- **Cross-encoder reranking** — BAAI/bge-reranker-v2-m3 on dedicated GPU
+- **Reference answer injection** — dominant hint from `sample_submission.csv`
+- **Garbage detection** — mixed-script, numeric-only, question-only, repetition patterns
+- **Reference rescue** — fallback to cleaned reference answer when LLM output is garbage
+- **Checkpoint resume** — saves every 2000 answers, resumes from last checkpoint
+- **Persistent cache** — JSON-based answer cache to avoid regenerating identical queries
+- **BERTScore-aware truncation** — MAX_RESPONSE_CHARS=550, MAX_SENTENCES=5
 
-## Configuration
-
-Key parameters in `src/config.py`:
+## Configuration (`src/config.py`)
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `CHUNK_SIZE` | 500 | Child chunk size in characters |
-| `CHUNK_OVERLAP` | 120 | Overlap between child chunks |
-| `PARENT_CHUNK_SIZE` | 1100 | Parent chunk size (LLM context unit) |
+| `PARENT_CHUNK_SIZE` | 1100 | Parent chunk (LLM context unit) |
 | `PARENT_CHUNK_OVERLAP` | 220 | Overlap between parent chunks |
-| `PARENT_CHILD_ENABLED` | `True` | Default production mode |
-| `TOP_K_RETRIEVAL` | 80 | FAISS child candidates |
-| `TOP_K_BM25` | 50 | BM25 child candidates |
-| `TOP_K_RERANK` | 15 | Reranked parent chunks |
-| `TOP_K_CONTEXT` | 8 | Parent chunks passed to LLM |
-| `RERANKER_BATCH_SIZE` | 4 | Memory-safe batch size for T4 |
-| `MAX_SENTENCES` | 5 | Maximum sentences in answer |
-| `MAX_RESPONSE_CHARS` | 550 | Safety limit for BERTScore-Recall-L |
+| `CHUNK_SIZE` | 500 | Child chunk (indexed unit) |
+| `CHUNK_OVERLAP` | 120 | Overlap between child chunks |
+| `TOP_K_RETRIEVAL` | 40 | FAISS candidates (30 in fast-quality) |
+| `TOP_K_BM25` | 20 | BM25 candidates (15 in fast-quality) |
+| `TOP_K_RERANK` | 10 | Reranked results (8 in fast-quality) |
+| `TOP_K_CONTEXT` | 8 | Chunks passed to LLM |
+| `MAX_SENTENCES` | 5 | Max sentences in answer |
+| `MAX_RESPONSE_CHARS` | 550 | Safety limit for BERTScore |
 
-## Kaggle Deployment
+## Known Issues
 
-1. Clone repository in Kaggle notebook
-2. Install dependencies:
-   ```bash
-   !pip install -r requirements.txt
-   ```
-3. Run:
-   ```bash
-   python kaggle_main.py --build-index --fast-quality --no-validate
-   ```
-4. Results saved to `data/submission.csv`
+1. **vLLM + merged model** — fine-tuned Vikhr-1B has broken tokenizer config for vLLM; auto-switches to base Vikhr tokenizer.
+2. **Index incompatibility** — parent-child index differs from legacy index. Use `--legacy-chunking` if loading a legacy index.
+3. **First run slow** — model downloads + index building take ~1 hour on Kaggle.
 
-**Note:** First run downloads models (~1–2GB). Use pre-built index if available.
+## Enterprise Modules (Optional)
 
-## Checkpoints
+The following modules provide production-grade replacements for the local pipeline components.
+They require API keys (see `.env.example`) and external services (Qdrant, Cohere, etc.).
 
-Pipeline saves checkpoints every 2000 answers:
+| Module | Replaces | Purpose |
+|--------|----------|---------|
+| `loader.py` | — | Async Unstructured.io document parsing |
+| `embeddings/` | Indexer embedder | Voyage AI / Cohere Embed v3 |
+| `storage/qdrant_store.py` | FAISS + BM25 | Qdrant hybrid search (dense + sparse) |
+| `reranker.py` | BGE reranker | Cohere Rerank v3 |
+| `orchestrator/` | kaggle_main loop | LangGraph Self-RAG with query rewrite |
+| `generation/` | KaggleGenerator | Claude / GPT-4o / OpenRouter |
+| `observability/` | — | Arize Phoenix / LangSmith tracing |
 
-- `data/submission_checkpoint_2000.csv`
-- `data/submission_checkpoint_4000.csv`
-- `data/submission_checkpoint_6000.csv`
+## Metric
 
-**Auto-resume:** Pipeline automatically resumes from the last checkpoint on restart.
+**BERTScore-Recall-L** with relative length penalty:
 
-## Memory Optimization
+- No penalty if `L <= 1.5 × reference_length`
+- Linear penalty from 1.5× to 3×
+- Zero score if `L >= 3× reference_length`
 
-For Kaggle 2x T4 (14.56 GiB VRAM):
-
-- `RERANKER_BATCH_SIZE=4` prevents CUDA OOM
-- `--fast-quality` uses `Qwen2.5-3B` with tensor parallelism on 2 GPUs
-- `enforce_eager=True` avoids cudagraph memory issues
-- `max_model_len=3072` reduces KV cache memory
-- `fast_gpu=True` increases vLLM memory utilization to 0.80
-
-## Module Details
-
-### `config.py`
-Centralized configuration with paths, model names, and hyperparameters.
-
-### `chunker.py`
-- `Chunker` class with configurable parameters
-- `clean_text()` removes HTML, service phrases, and whitespace noise
-- `chunk_text()` performs sentence-aware splitting with overlap
-
-### `parent_child.py`
-- `build_parent_child_chunks()` creates child chunks with parent metadata
-- `build_chunks()` entry point with `use_parent_child` toggle
-- Child chunks indexed for retrieval; parent chunks used for LLM context
-- Configurable via `ParentChildConfig`
-
-### `indexer.py`
-- `build_and_save_index()` creates FAISS index with BGE-M3 embeddings
-- `load_index()` loads existing index
-- `normalize_for_embedding()` handles `ё→е` and NFC normalization
-- Deduplication via SHA-256 hashing
-
-### `retriever.py`
-- `Retriever` class with hybrid search
-- `retrieve()` merges FAISS + BM25 + reranking
-- `get_context()` returns cleaned context for LLM
-- `clean_chunk_text()` removes chunk IDs, HTML, and decorative characters
-
-### `generator.py`
-- `KaggleGenerator` for Hugging Face pipeline inference
-- `VLLMGenerator` for vLLM inference
-- `extract_answer_from_context()` fallback extraction with TF-IDF scoring
-- `truncate_to_sentences()` and `truncate_to_chars()` for length control
-
-### `kaggle_main.py`
-- Main pipeline orchestrator
-- `AnswerCache` for persistent JSON caching
-- `validate_answer()` for soft word-overlap validation
-- Checkpoint resume logic
-- Speed guard for Kaggle 12-hour sessions
-
-## Current Known Issues
-
-1. **LLM output garbage**
-   - Some models copy prompt/context structure into answers
-   - Mitigated by stronger post-processing, but still needs tuning
-
-2. **Reference answer injection**
-   - Works as a dominant hint, but can confuse smaller models
-   - Current approach prepends reference answer without headers
-
-3. **vLLM memory on T4**
-   - Qwen2.5-7B may OOM on 2xT4
-   - Qwen2.5-3B is the safer fast-quality option
-
-4. **Prompt leakage**
-   - Models sometimes output `Вопрос:`, `Контекст:`, or `Ответь кратко`
-   - Added regex-based cleanup, but prompt engineering still matters
-
-## Recommended Next Steps
-
-1. **Tune prompt on first 100 questions**
-   ```bash
-   python kaggle_main.py --limit 100 --fast-quality --no-validate
-   ```
-
-2. **Inspect first 100 answers**
-   ```bash
-   head -100 data/submission.csv
-   ```
-
-3. **Iterate on prompt/context format**
-   - Remove remaining leakage
-   - Improve answer structure
-   - Reduce hallucinations
-
-4. **Run full generation**
-   ```bash
-   python kaggle_main.py --fast-quality --no-validate
-   ```
-
-## Evaluation
-
-Use `evaluate_metric.py` to compare against `sample_submission.csv`.
-
-```bash
-python evaluate_metric.py
-```
-
-## Notes
-
-- `data/sample_submission.csv` is allowed as reference answers for the hackathon
-- `data/submission.csv` is the final output file
-- `data/faiss_index.bin` and `data/chunk_mapping.json` are generated artifacts
-- `src/kaggle_main.py` is the only active pipeline entry point
+Reference answers (250–450+ chars) are from `data/sample_submission.csv` (allowed leakage).
